@@ -42,6 +42,7 @@ AC_CONFIG_FILES([Makefile
 	utils/cec-follower/cec-follower.1
 	utils/qvidcap/Makefile
 	utils/rds-ctl/Makefile
+	utils/tracer/Makefile
 
 	contrib/Makefile
 	contrib/freebsd/Makefile
@@ -310,6 +311,11 @@ AS_IF([test "x$with_libudev" != xno -o "x$enable_libdvbv5" != xno],
             )])
 
 AC_SUBST([JPEG_LIBS])
+
+PKG_CHECK_MODULES(JSONC, [json-c >= 0.16], [jsonc_pkgconfig=yes], [jsonc_pkgconfig=no])
+AC_SUBST([JSONC_CFLAGS])
+AC_SUBST([JSONC_LIBS])
+AM_CONDITIONAL([HAVE_JSONC], [test x$jsonc_pkgconfig = xyes])
 
 # Check for pthread
 

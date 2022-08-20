@@ -1,0 +1,9 @@
+*.json
+*.yuv
+*.webm
+*.h264
+*.ivf
+*.vp8
+tracer
+retracer
+.clang-tidy
