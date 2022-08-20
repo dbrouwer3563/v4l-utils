@@ -10,10 +10,14 @@ libtracer_la_CPPFLAGS = -I$(top_srcdir)/utils/common $(JSONC_CFLAGS)
 libtracer_la_LDFLAGS = -avoid-version -module -shared -export-dynamic -ldl $(JSONC_LIBS)
 libtracer_la_LIBTOOLFLAGS = --tag=disable-static
 
-bin_PROGRAMS = tracer
+bin_PROGRAMS = tracer retracer
 
 tracer_SOURCES = tracer.cpp
 tracer_CPPFLAGS = -I$(top_srcdir)/utils/common $(JSONC_CFLAGS)
 tracer_LDFLAGS = -lrt -lpthread $(JSONC_LIBS)
+
+retracer_SOURCES = retracer.cpp retrace-helper.cpp retrace-vp8.cpp trace-info.cpp ../common/v4l2-info.cpp
+retracer_CPPFLAGS = -I$(top_srcdir)/utils/common $(JSONC_CFLAGS)
+retracer_LDFLAGS = -lrt -lpthread  $(JSONC_LIBS)
 
 endif
