@@ -1,0 +1,667 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * Copyright 2022 Collabora Ltd.
+ */
+
+#include "libtracer.h"
+
+struct trace_options options;
+
+struct trace_context ctx_trace = {
+	.lock = PTHREAD_MUTEX_INITIALIZER
+};
+
+bool options_are_set(void)
+{
+	return options.options_are_set;
+}
+
+void set_options(void)
+{
+	options.verbose = getenv("TRACE_OPTION_VERBOSE") ? true : false;
+	options.pretty_print_mem = getenv("TRACE_OPTION_PRETTY_PRINT_MEM") ? true : false;
+	options.pretty_print_all = getenv("TRACE_OPTION_PRETTY_PRINT_ALL") ? true : false;
+	options.write_decoded_data_to_json_file = getenv("TRACE_OPTION_WRITE_DECODED_TO_JSON_FILE") ? true : false;
+	options.write_decoded_data_to_yuv_file = getenv("TRACE_OPTION_WRITE_DECODED_TO_YUV_FILE") ? true : false;
+	options.options_are_set = true;
+}
+
+bool option_is_set_verbose(void)
+{
+	return options.verbose;
+}
+
+bool option_is_set_pretty_print_mem(void)
+{
+	return options.pretty_print_mem;
+}
+
+bool option_is_set_write_decoded_data_to_json_file(void)
+{
+	return options.write_decoded_data_to_json_file;
+}
+
+bool is_video_or_media_device(const char *path)
+{
+	std::string dev_path_video = "/dev/video";
+	std::string dev_path_media = "/dev/media";
+	if (strncmp(path, dev_path_video.c_str(), dev_path_video.length()) &&
+	    strncmp(path, dev_path_media.c_str(), dev_path_media.length()))
+		return false;
+	return true;
+}
+
+void add_device(int fd, std::string path)
+{
+	std::pair<int, std::string> new_pair = std::make_pair(fd, path);
+	pthread_mutex_lock(&ctx_trace.lock);
+	ctx_trace.devices.insert(new_pair);
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+std::string get_device(int fd)
+{
+	std::string path;
+	std::unordered_map<int, std::string>::const_iterator it;
+	pthread_mutex_lock(&ctx_trace.lock);
+	it = ctx_trace.devices.find(fd);
+	if (it != ctx_trace.devices.end())
+		path = it->second;
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return path;
+}
+
+int remove_device(int fd)
+{
+	int ret = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	ret = ctx_trace.devices.erase(fd);
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return ret;
+}
+
+int count_devices(void)
+{
+	int count = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	count = ctx_trace.devices.size();
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return count;
+}
+
+void set_pixelformat_trace(__u32 width, __u32 height, __u32 pixelformat)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	ctx_trace.width = width;
+	ctx_trace.height = height;
+	ctx_trace.pixelformat = pixelformat;
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+__u32 get_pixelformat(void)
+{
+	__u32 pixelformat = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	pixelformat = ctx_trace.pixelformat;
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return pixelformat;
+}
+
+void set_compression_format(__u32 compression_format)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	ctx_trace.compression_format = compression_format;
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+__u32 get_compression_format(void)
+{
+	__u32 compression_format = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	compression_format = ctx_trace.compression_format;
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return compression_format;
+}
+
+void set_compressed_frame_count(int count)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	ctx_trace.compressed_frame_count = count;
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+int get_compressed_frame_count(void)
+{
+	int ret = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	ret = ctx_trace.compressed_frame_count;
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return ret;
+}
+
+void set_decode_order(long decode_order)
+{
+	std::list<long>::iterator it;
+	pthread_mutex_lock(&ctx_trace.lock);
+	it = find(ctx_trace.decode_order.begin(), ctx_trace.decode_order.end(), decode_order);
+	if (it == ctx_trace.decode_order.end())
+		ctx_trace.decode_order.push_front(decode_order);
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+long get_decode_order(void)
+{
+	long decode_order = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	if (!ctx_trace.decode_order.empty())
+		decode_order = ctx_trace.decode_order.front();
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return decode_order;
+}
+
+void set_max_pic_order_cnt_lsb(int max_pic_order_cnt_lsb)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	ctx_trace.max_pic_order_cnt_lsb = max_pic_order_cnt_lsb;
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+int get_max_pic_order_cnt_lsb(void)
+{
+	int max_pic_order_cnt_lsb = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	max_pic_order_cnt_lsb = ctx_trace.max_pic_order_cnt_lsb;
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return max_pic_order_cnt_lsb;
+}
+
+void set_pic_order_ctn_lsb(int pic_order_ctn_lsb)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	ctx_trace.pic_order_ctn_lsb = pic_order_ctn_lsb;
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+int get_pic_order_ctn_lsb(void)
+{
+	int pic_order_ctn_lsb = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	pic_order_ctn_lsb = ctx_trace.pic_order_ctn_lsb;
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return pic_order_ctn_lsb;
+}
+
+void add_buffer_trace(int fd, __u32 type, __u32 index, __u32 offset)
+{
+	struct buffer_trace buf;
+	memset(&buf, 0, sizeof(buffer_trace));
+	buf.fd = fd;
+	buf.type = type;
+	buf.index = index;
+	buf.offset = offset;
+	buf.display_order = -1;
+
+	pthread_mutex_lock(&ctx_trace.lock);
+	ctx_trace.buffers.push_front(buf);
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+bool buffer_in_trace_context(int fd, __u32 offset)
+{
+	bool buffer_in_trace_context = false;
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->fd == fd) && (it->offset == offset)) {
+			buffer_in_trace_context = true;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return buffer_in_trace_context;
+}
+
+int get_buffer_fd_trace(__u32 type, __u32 index)
+{
+	int fd = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->type == type) && (it->index == index)) {
+			fd = it->fd;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return fd;
+}
+
+__u32 get_buffer_type_trace(int fd, __u32 offset)
+{
+	__u32 type = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->fd == fd) && (it->offset == offset)) {
+			type = it->type;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return type;
+}
+
+int get_buffer_index_trace(int fd, __u32 offset)
+{
+	int index = -1;
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->fd == fd) && (it->offset == offset)) {
+			index = it->index;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return index;
+}
+
+__u32 get_buffer_offset_trace(__u32 type, __u32 index)
+{
+	__u32 offset = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->type == type) && (it->index == index)) {
+			offset = it->offset;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return offset;
+}
+
+void set_buffer_bytesused_trace(int fd, __u32 offset, __u32 bytesused)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->fd == fd) && (it->offset == offset)) {
+			it->bytesused = bytesused;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+long get_buffer_bytesused_trace(int fd, __u32 offset)
+{
+	long bytesused = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->fd == fd) && (it->offset == offset)) {
+			bytesused = it->bytesused;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return bytesused;
+}
+
+void set_buffer_display_order(int fd, __u32 offset, long display_order)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->fd == fd) && (it->offset == offset)) {
+			it->display_order = display_order;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+void set_buffer_address_trace(int fd, __u32 offset, unsigned long address)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->fd == fd) && (it->offset == offset)) {
+			it->address = address;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+unsigned long get_buffer_address_trace(int fd, __u32 offset)
+{
+	unsigned long address = 0;
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+		if ((it->fd == fd) && (it->offset == offset)) {
+			address = it->address;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return address;
+}
+
+bool buffer_is_mapped(unsigned long buffer_address)
+{
+	bool ret = false;
+	pthread_mutex_lock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.cbegin(); it != ctx_trace.buffers.cend(); ++it) {
+		if (it->address == buffer_address) {
+			ret = true;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return ret;
+}
+
+std::string get_ioctl_request_str(unsigned long request)
+{
+	__u8 ioctl_type = _IOC_TYPE(request);
+	switch (ioctl_type) {
+		case 'V': {
+			if (option_is_set_verbose())
+				fprintf(stderr, "%s\n", ioctl2s_video(request).c_str());
+			return ioctl2s_video(request);
+		}
+		case '|':
+			return ioctl2s_media(request);
+		case 'b':
+			if (request == DMA_BUF_IOCTL_SYNC)
+				return "DMA_BUF_IOCTL_SYNC";
+			break;
+		default:
+			break;
+	}
+	return "unknown ioctl";
+}
+
+unsigned get_expected_length_trace()
+{
+	unsigned width;
+	unsigned height;
+	unsigned pixelformat;
+	unsigned expected_length;
+
+	pthread_mutex_lock(&ctx_trace.lock);
+	width = ctx_trace.width;
+	height = ctx_trace.height;
+	pixelformat = ctx_trace.pixelformat;
+	pthread_mutex_unlock(&ctx_trace.lock);
+
+	/*
+	 * TODO: this is a bare-minimum implementation, it assumes that the stride is equal to the real
+	 * width and that the padding follows the end of the chroma plane. It could be improved by
+	 * following the model in v4l2-ctl-streaming.cpp read_write_padded_frame()
+	 */
+	expected_length = width * height;
+	if (pixelformat == V4L2_PIX_FMT_NV12 || pixelformat == V4L2_PIX_FMT_YUV420) {
+		expected_length *= 3;
+		expected_length /= 2;
+		expected_length += (expected_length % 2);
+	}
+	return expected_length;
+}
+
+void trace_mem_decoded(void)
+{
+	int displayed_count = 0;
+
+	unsigned expected_length = get_expected_length_trace();
+
+	pthread_mutex_lock(&ctx_trace.lock);
+
+	while (!ctx_trace.decode_order.empty()) {
+
+		std::list<buffer_trace>::iterator it;
+		long next_frame_to_be_displayed = *std::min_element(ctx_trace.decode_order.begin(),
+		                                                    ctx_trace.decode_order.end());
+
+		for (it = ctx_trace.buffers.begin(); it != ctx_trace.buffers.end(); ++it) {
+			if (it->display_order != next_frame_to_be_displayed)
+				continue;
+			if (!it->address)
+				break;
+			if (it->bytesused < expected_length)
+				break;
+			if (option_is_set_verbose())
+				fprintf(stderr, "Displaying: %ld, %s, index: %d\n",
+				        it->display_order, buftype2s(it->type).c_str(), it->index);
+			displayed_count++;
+
+			if (options.write_decoded_data_to_yuv_file) {
+				std::string filename = getenv("TRACE_ID");
+				filename +=  ".yuv";
+				FILE *fp = fopen(filename.c_str(), "a");
+				unsigned char *buffer_pointer = (unsigned char*) it->address;
+				for (__u32 i = 0; i < expected_length; i++)
+					fwrite(&buffer_pointer[i], sizeof(unsigned char), 1, fp);
+				fclose(fp);
+			}
+			int fd = it->fd;
+			__u32 offset = it->offset;
+			__u32 type = it->type;
+			int index = it->index;
+			__u32 bytesused = it->bytesused;
+			unsigned long start = it->address;
+
+			pthread_mutex_unlock(&ctx_trace.lock);
+			trace_mem(fd, offset, type, index, bytesused, start);
+			pthread_mutex_lock(&ctx_trace.lock);
+
+			ctx_trace.decode_order.remove(next_frame_to_be_displayed);
+			it->display_order = -1;
+			break;
+		}
+		if (!it->address || it == ctx_trace.buffers.end() || it->bytesused < expected_length)
+			break;
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+	set_compressed_frame_count(get_compressed_frame_count() - displayed_count);
+}
+
+void s_ext_ctrls_setup(struct v4l2_ext_controls *ext_controls)
+{
+	if (ext_controls->which != V4L2_CTRL_WHICH_REQUEST_VAL)
+		return;
+
+	for (__u32 i = 0; i < ext_controls->count; i++) {
+		struct v4l2_ext_control ctrl = ext_controls->controls[i];
+
+		switch (ctrl.id) {
+		case V4L2_CID_STATELESS_H264_SPS: {
+			set_max_pic_order_cnt_lsb(pow(2, ctrl.p_h264_sps->log2_max_pic_order_cnt_lsb_minus4 + 4));
+			break;
+		}
+		case V4L2_CID_STATELESS_H264_DECODE_PARAMS: {
+			long pic_order_ctn_msb;
+			int max = get_max_pic_order_cnt_lsb();
+			long prev_pic_order_ctn_msb = get_decode_order();
+			int prev_pic_order_ctn_lsb = get_pic_order_ctn_lsb();
+			int pic_order_cnt_lsb = ctrl.p_h264_decode_params->pic_order_cnt_lsb;
+
+			if (prev_pic_order_ctn_msb == 0)
+				pic_order_ctn_msb = 0;
+
+			/*
+			 * When pic_order_cnt_lsb wraps around to zero, adjust the total count using
+			 * max to keep the correct display order. From H264 specification 8.2.1.1.
+			 */
+			if ((pic_order_cnt_lsb < prev_pic_order_ctn_lsb) &&
+				((prev_pic_order_ctn_lsb - pic_order_cnt_lsb) >= (max / 2))) {
+				pic_order_ctn_msb = prev_pic_order_ctn_msb + max;
+			} else if ((pic_order_cnt_lsb > prev_pic_order_ctn_lsb) &&
+				((pic_order_cnt_lsb - prev_pic_order_ctn_lsb) > (max / 2))) {
+				pic_order_ctn_msb = prev_pic_order_ctn_msb - max;
+			} else {
+				pic_order_ctn_msb = prev_pic_order_ctn_msb + (pic_order_cnt_lsb - prev_pic_order_ctn_lsb);
+			}
+			set_pic_order_ctn_lsb(pic_order_cnt_lsb);
+			set_decode_order(pic_order_ctn_msb);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+}
+
+void qbuf_setup(struct v4l2_buffer *buf)
+{
+	if (option_is_set_verbose())
+		fprintf(stderr, "\nQBUF: %s, index: %d\n", buftype2s(buf->type).c_str(), buf->index);
+
+	int buf_fd = get_buffer_fd_trace(buf->type, buf->index);
+	__u32 buf_offset = get_buffer_offset_trace(buf->type, buf->index);
+
+	__u32 bytesused = 0;
+	if (buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE || buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+		bytesused = buf->m.planes[0].bytesused;
+	if (buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT || buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		bytesused = buf->bytesused;
+	set_buffer_bytesused_trace(buf_fd, buf_offset, bytesused);
+
+	/* The output buffer should have compressed data just before it is queued, so trace it. */
+	if (buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE || buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT) {
+		trace_mem_encoded(buf_fd, buf_offset);
+		set_compressed_frame_count(get_compressed_frame_count() + 1);
+	}
+
+	/*
+	 * The first time the capture buffer is queued, it won't have decoded data to trace, but
+	 * it will set a default display order that the controls can override.  If the capture
+	 * buffer is subsequently queued for reuse, trace it before it is reused.
+	 */
+	if (buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE || buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		if (get_compressed_frame_count())
+			trace_mem_decoded();
+
+		/* H264 sets display order in controls, otherwise the default display order is the queued order. */
+		if (get_compression_format() != V4L2_PIX_FMT_H264_SLICE)
+			set_decode_order(get_decode_order() + 1);
+
+		set_buffer_display_order(buf_fd, buf_offset, get_decode_order());
+	}
+
+	if (option_is_set_verbose()) {
+		print_buffers_trace();
+		print_decode_order();
+	}
+}
+
+void streamoff_cleanup(v4l2_buf_type buf_type)
+{
+	if (option_is_set_verbose()) {
+		fprintf(stderr, "\nVIDIOC_STREAMOFF: %s\n", buftype2s(buf_type).c_str());
+		fprintf(stderr, "compression: %s, pixelformat: %s %s, width: %d, height: %d\n",
+		        pixfmt2s(get_compression_format()).c_str(), pixfmt2s(get_pixelformat()).c_str(),
+		        fcc2s(get_pixelformat()).c_str(), ctx_trace.width, ctx_trace.height);
+	}
+
+	/*
+	 * Before turning off the stream, trace any remaining capture buffers that were missed
+	 * because they were not queued for reuse.
+	 */
+	if (buf_type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE || buf_type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		if (get_compressed_frame_count())
+			trace_mem_decoded();
+	}
+}
+
+void g_fmt_setup_trace(struct v4l2_format *format)
+{
+	if (format->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+		set_pixelformat_trace(format->fmt.pix.width, format->fmt.pix.height, format->fmt.pix.pixelformat);
+	if (format->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+		set_pixelformat_trace(format->fmt.pix_mp.width, format->fmt.pix_mp.height, format->fmt.pix_mp.pixelformat);
+
+	if (format->type == V4L2_BUF_TYPE_VIDEO_OUTPUT)
+		set_compression_format(format->fmt.pix.pixelformat);
+	if (format->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+		set_compression_format(format->fmt.pix_mp.pixelformat);
+}
+
+void s_fmt_setup(struct v4l2_format *format)
+{
+	if (format->type == V4L2_BUF_TYPE_VIDEO_OUTPUT)
+		set_compression_format(format->fmt.pix.pixelformat);
+	if (format->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+		set_compression_format(format->fmt.pix_mp.pixelformat);
+}
+
+void expbuf_setup(int fd, struct v4l2_exportbuffer *export_buffer)
+{
+	if ((export_buffer->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) ||
+	    (export_buffer->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)) {
+
+		if (!buffer_in_trace_context(fd))
+			add_buffer_trace(export_buffer->fd, export_buffer->type, export_buffer->index);
+	}
+}
+
+void querybuf_setup(int fd, struct v4l2_buffer *buf)
+{
+	if ((buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) || (buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT)) {
+		switch (buf->memory) {
+		case V4L2_MEMORY_MMAP: {
+			if (!get_buffer_type_trace(fd, buf->m.offset))
+				add_buffer_trace(fd, buf->type, buf->index, buf->m.offset);
+			break;
+		}
+		case V4L2_MEMORY_USERPTR:
+		case V4L2_MEMORY_DMABUF:
+		default:
+			break;
+		}
+	}
+}
+
+void print_decode_order(void)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	fprintf(stderr, "Decode order: ");
+	for (auto it = ctx_trace.decode_order.cbegin(); it != ctx_trace.decode_order.cend(); it++)
+		fprintf(stderr, "%ld, ",  *it);
+	fprintf(stderr, ".\n");
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+void print_buffers_trace(void)
+{
+	pthread_mutex_unlock(&ctx_trace.lock);
+	for (auto it = ctx_trace.buffers.cbegin(); it != ctx_trace.buffers.cend(); ++it) {
+		fprintf(stderr, "fd: %d, %s, index: %d, display_order: %ld, bytesused: %d, ",
+		        it->fd, buftype2s(it->type).c_str(), it->index, it->display_order, it->bytesused);
+		fprintf(stderr, "address: %lu, offset: %d \n",  it->address, it->offset);
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+void write_json_object_to_json_file(json_object *jobj, int flags)
+{
+	if (options.pretty_print_all)
+		flags = JSON_C_TO_STRING_PRETTY;
+
+	std::string json_str = json_object_to_json_string_ext(jobj, flags);
+	pthread_mutex_lock(&ctx_trace.lock);
+
+	if (!ctx_trace.trace_file) {
+		ctx_trace.trace_filename = getenv("TRACE_ID");
+		ctx_trace.trace_filename += ".json";
+		ctx_trace.trace_file = fopen(ctx_trace.trace_filename.c_str(), "a");
+	}
+
+	fwrite(json_str.c_str(), sizeof(char), json_str.length(), ctx_trace.trace_file);
+	fputs(",\n", ctx_trace.trace_file);
+	fflush(ctx_trace.trace_file);
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+void close_json_file(void)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	if (ctx_trace.trace_file) {
+		fclose(ctx_trace.trace_file);
+		ctx_trace.trace_file = 0;
+	}
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
