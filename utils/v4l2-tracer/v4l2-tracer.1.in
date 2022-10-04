@@ -1,0 +1,104 @@
+.TH "V4L2-TRACER" "1" "October 2022" "v4l-utils @PACKAGE_VERSION@" "User Commands"
+.SH NAME
+v4l2-tracer - An application to trace and replay stateless video decoding.
+.SH SYNOPSIS
+\fBv4l2-tracer trace\fR [trace options] -- <\fItracee\fR>
+.RS
+.RE
+\fBv4l2-tracer retrace\fR [retrace options] -- <\fItrace_file\fR>\fB.json\fR
+.RS
+.RE
+
+.SH DESCRIPTION
+The v4l2-tracer utility traces, records and replays userspace applications
+that implement the v4l2 memory-to-memory stateless video decoder interface.
+The trace function intercepts and copies all system calls, stateless codec
+controls and encoded data to a json-formatted trace file. The retrace function
+independently reads and replays the json trace file. The json trace file can
+be retraced independently from its original userspace environment and can be
+edited to inject errors to test a driver's error handling abilities.
+
+.SH OPTIONS
+.SS Trace Options
+.TP
+\fB\-e\fR, \fB\-\-prettymem\fR
+Add whitespace in json file to improve readability of memory arrays.
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Display trace help.
+.TP
+\fB\-p\fR, \fB\-\-pretty\fR
+Add whitespace in json file to improve readability.
+.TP
+\fB\-r\fR, \fB\-\-raw\fR
+Write decoded data to json file.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Turn on verbose reporting.
+.TP
+\fB\-y\fR, \fB\-\-yuv\fR
+Write decoded data to yuv file.
+
+.SS Retrace Options
+.TP
+\fB\-d\fR, \fB\-\-device\fR <\fIdev\fR>
+Use a different video device than specified in the trace file.
+.RS
+<\fIdev\fR> must be a digit corresponding to an existing /dev/video<\fIdev\fR>
+.RE
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Display retrace help.
+.TP
+\fB\-m\fR, \fB\-\-media\fR <\fIdev\fR>
+Use a different media device than specified in the trace file.
+.RS
+<\fIdev\fR> must be a digit corresponding to an existing /dev/media<\fIdev\fR>
+.RE
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Turn on verbose reporting.
+
+.SH EXIT STATUS
+On success, it returns 0. Otherwise, it will return 1 or an error code.
+
+.SH EXAMPLES
+Trace VP8 decoding:
+.TP
+.EX
+	v4l2-tracer trace -- gst-launch-1.0 -- filesrc location=test-25fps.vp8 ! parsebin ! v4l2slvp8dec ! videocodectestsink
+.EE
+.TP
+Trace H264 decoding:
+.TP
+.EX
+	v4l2-tracer trace -- gst-launch-1.0 -- filesrc location=test-25fps.h264 ! parsebin ! v4l2slh264dec ! videocodectestsink
+.EE
+.TP
+Trace FWHT decoding:
+.TP
+.EX
+	v4l2-tracer trace -- v4l2-ctl -d9 --stream-mmap --stream-out-mmap --stream-from-hdr test-25fps.fwht --stream-to out.yuv
+.EE
+.TP
+Retrace:
+.TP
+.EX
+	v4l2-tracer retrace 79568_trace.json
+.EE
+.TP
+Retrace using /dev/video6 and /dev/media3:
+.TP
+.EX
+	v4l2-tracer retrace -d 6 -m 3 79568_trace.json
+.EE
+.TP
+Self-trace:
+.TP
+.EX
+	v4l2-tracer trace -- v4l2-tracer retrace 79568_trace.json
+.EE
+
+.SH BUGS
+Bug reports or questions about this utility should be sent to the
+linux-media@vger.kernel.org mailinglist.
