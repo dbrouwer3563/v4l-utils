@@ -1,0 +1,8 @@
+trace-gen.cpp
+trace-gen.h
+retrace-gen.cpp
+retrace-gen.h
+trace-info-gen.cpp
+trace-info-gen.h
+v4l2-tracer
+v4l2-tracer.1
