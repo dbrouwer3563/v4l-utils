@@ -5,8 +5,6 @@
 
 #include <math.h> /* for pow */
 #include "v4l2-tracer-common.h"
-#include "trace-helper.h"
-#include "trace-info-gen.h"
 
 void trace_mem(int fd, __u32 offset, __u32 type, int index, __u32 bytesused, unsigned long start);
 void trace_mem_encoded(int fd, __u32 offset);
@@ -70,22 +68,6 @@ std::string which2s(unsigned long which)
 	default:
 		break;
 	}
-
-	return s;
-}
-
-std::string val2s(unsigned long val, const definition *def)
-{
-	std::string s;
-
-	if (val == 0)
-		return s;
-
-	while ((def->val) && (def->val != val))
-		def++;
-
-	if (def->val == val)
-		s = def->str;
 
 	return s;
 }
@@ -479,27 +461,6 @@ void print_buffers_trace(void)
 	pthread_mutex_unlock(&ctx_trace.lock);
 }
 
-std::string get_ioctl_request_str(unsigned long request)
-{
-	__u8 ioctl_type = _IOC_TYPE(request);
-	switch (ioctl_type) {
-		case 'V': {
-			if (option_is_set_verbose())
-				fprintf(stderr, "%s\n", ioctl2s_video(request).c_str());
-			return ioctl2s_video(request);
-		}
-		case '|':
-			return ioctl2s_media(request);
-		case 'b':
-			if (request == DMA_BUF_IOCTL_SYNC)
-				return "DMA_BUF_IOCTL_SYNC";
-			break;
-		default:
-			break;
-	}
-	return "unknown ioctl";
-}
-
 unsigned get_expected_length_trace()
 {
 	unsigned width;
@@ -591,6 +552,11 @@ void s_ext_ctrls_setup(struct v4l2_ext_controls *ext_controls)
 	if (option_is_set_verbose())
 		fprintf(stderr, "\n%s\n", __func__);
 
+	/*
+	 * Since userspace sends H264 frames out of order, get information
+	 * about the correct display order of each frame so that v4l2-tracer
+	 * can write the decoded frames to a file.
+	 */
 	for (__u32 i = 0; i < ext_controls->count; i++) {
 		struct v4l2_ext_control ctrl = ext_controls->controls[i];
 

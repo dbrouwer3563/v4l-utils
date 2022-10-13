@@ -6,14 +6,8 @@
 #ifndef TRACE_HELPER_H
 #define TRACE_HELPER_H
 
-struct definition {
-	unsigned long val;
-	const char *str;
-};
-
 std::string ver2s(unsigned int version);
 std::string which2s(unsigned long which);
-std::string val2s(unsigned long val, const definition *def);
 
 bool options_are_set(void);
 void set_options(void);
@@ -34,8 +28,6 @@ long get_buffer_bytesused_trace(int fd, __u32 offset);
 void set_buffer_address_trace(int fd, __u32 offset, unsigned long address);
 unsigned long get_buffer_address_trace(int fd, __u32 offset);
 bool buffer_is_mapped(unsigned long buffer_address);
-
-std::string get_ioctl_request_str(unsigned long request);
 
 void s_ext_ctrls_setup(struct v4l2_ext_controls *ext_controls);
 void qbuf_setup(struct v4l2_buffer *buf);

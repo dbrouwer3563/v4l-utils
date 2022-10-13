@@ -31,13 +31,13 @@ Display trace help.
 Add whitespace in json file to improve readability.
 .TP
 \fB\-r\fR, \fB\-\-raw\fR
-Write decoded data to json file.
+Write decoded video frame data to json file.
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Turn on verbose reporting.
 .TP
 \fB\-y\fR, \fB\-\-yuv\fR
-Write decoded data to yuv file.
+Write decoded video frame data to yuv file.
 
 .SS Retrace Options
 .TP

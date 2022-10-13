@@ -46,19 +46,22 @@ sub flag_gen {
 		($flag_func_name) = ($_) =~ /#define (\w+_)FLAG_.+/;
 		$flag_func_name = lc $flag_func_name;
 	}
-	printf $fh_trace_info_cpp "std::string %sflag2s(unsigned long flag)\n{\n", $flag_func_name;
-	printf $fh_trace_info_h "std::string %sflag2s(unsigned long flag);\n", $flag_func_name;
-	printf $fh_trace_info_cpp "\tstatic constexpr flag_def def[] = {\n";
+	printf $fh_common_info_h "constexpr flag_def %sflag_def[] = {\n", $flag_func_name;
+
 	($flag) = ($_) =~ /#define\s+(\w+)\s+.+/;
-	printf $fh_trace_info_cpp "\t\t{ $flag, \"$flag\" },\n";
+
+	#get the first flag
+	printf $fh_common_info_h "\t{ $flag, \"$flag\" },\n";
+
 	while (<>) {
 		next if ($_ =~ /^\/?\s?\*.*/); #skip comments between flags if any
 		next if $_ =~ /^\s*$/; #skip blank lines between flags if any
 		last if ((grep {!/^#define\s+\w+_FL/} $_) && (grep {!/^#define V4L2_VP8_LF/} $_));
 		($flag) = ($_) =~ /#define\s+(\w+)\s+.+/;
-		printf $fh_trace_info_cpp "\t\t{ $flag, \"$flag\" },\n";
+
+		printf $fh_common_info_h "\t{ $flag, \"$flag\" },\n";
 	}
-	printf $fh_trace_info_cpp "\t\t{ 0, nullptr }\n\t};\n\treturn flags2s(flag, def);\n}\n\n";
+	printf $fh_common_info_h "\t{ 0, nullptr }\n};\n\n";
 }
 
 sub struct_gen {
@@ -190,14 +193,19 @@ sub struct_gen {
 			printf $fh_retrace_cpp "\tp->%s = \*retrace_%s_gen(%s_obj);\n\n", $member, $struct_name_nested, $member;
 		} else {
 			# members that are integers
-			printf $fh_trace_cpp "\tjson_object_object_add(%s_obj, \"%s\", json_object_new_%s(p->%s));\n", $struct_name, $member, $json_type, $member;
+
+			if ($member =~ /^flags/) {
+				printf $fh_trace_cpp "\tjson_object_object_add(%s_obj, \"flags\", json_object_new_string(flags2s(p->flags, %sflag_def).c_str()));\n", $struct_name, $flag_func_name;
+			} else {
+				printf $fh_trace_cpp "\tjson_object_object_add(%s_obj, \"%s\", json_object_new_%s(p->%s));\n", $struct_name, $member, $json_type, $member;
+			}
+
 			printf $fh_retrace_cpp "\n\tjson_object *%s_obj;\n", $member;
 			printf $fh_retrace_cpp "\tjson_object_object_get_ex(%s_obj, \"%s\", &%s_obj);\n", $struct_name, $member, $member;
-			printf $fh_retrace_cpp "\tp->%s = ($type) json_object_get_%s(%s_obj);\n", $member, $json_type, $member;
-
-			# add flag strings
 			if ($member =~ /^flags/) {
-				printf $fh_trace_cpp "\tjson_object_object_add(%s_obj, \"flags_str\", json_object_new_string(%sflag2s(p->flags).c_str()));\n", $struct_name, $flag_func_name;
+				printf $fh_retrace_cpp "\tp->%s = ($type) s2flags(json_object_get_string(%s_obj), %sflag_def);\n", $member, $member, $flag_func_name;
+			} else {
+				printf $fh_retrace_cpp "\tp->%s = ($type) json_object_get_%s(%s_obj);\n", $member, $json_type, $member;
 			}
 		}
 	}
@@ -208,98 +216,109 @@ sub struct_gen {
 	printf $fh_retrace_cpp "}\n\n";
 }
 
-open($fh_trace_cpp, '>', 'trace-gen.cpp') or die "Could not open trace-gen.cpp for writing";
+open($fh_trace_cpp, '>', 'trace-ctrl-gen.cpp') or die "Could not open trace-ctrl-gen.cpp for writing";
 printf $fh_trace_cpp "/* SPDX-License-Identifier: GPL-2.0-only */\n/*\n * Copyright 2022 Collabora Ltd.\n */\n\n";
-printf $fh_trace_cpp "#include \"v4l2-tracer-common.h\"\n#include \"trace-info-gen.h\"\n\n";
+printf $fh_trace_cpp "#include \"v4l2-tracer-common.h\"\n\n";
 
-open($fh_trace_h, '>', 'trace-gen.h') or die "Could not open trace-gen.h for writing";
+open($fh_trace_h, '>', 'trace-ctrl-gen.h') or die "Could not open trace-ctrl-gen.h for writing";
 printf $fh_trace_h "/* SPDX-License-Identifier: GPL-2.0-only */\n/*\n * Copyright 2022 Collabora Ltd.\n */\n\n";
-printf $fh_trace_h "\#ifndef TRACE_GEN_H\n";
-printf $fh_trace_h "\#define TRACE_GEN_H\n\n";
+printf $fh_trace_h "\#ifndef TRACE_CTRL_GEN_H\n";
+printf $fh_trace_h "\#define TRACE_CTRL_GEN_H\n\n";
 
-open($fh_retrace_cpp, '>', 'retrace-gen.cpp') or die "Could not open retrace-gen.cpp for writing";
+open($fh_retrace_cpp, '>', 'retrace-ctrls-gen.cpp') or die "Could not open retrace-ctrls-gen.cpp for writing";
 printf $fh_retrace_cpp "/* SPDX-License-Identifier: GPL-2.0-only */\n/*\n * Copyright 2022 Collabora Ltd.\n */\n\n";
-printf $fh_retrace_cpp "#include \"v4l2-tracer-common.h\"\n\n";
+printf $fh_retrace_cpp "#include \"v4l2-tracer-common.h\"\n#include \"retrace-helper.h\"\n\n";
 
-open($fh_retrace_h, '>', 'retrace-gen.h') or die "Could not open retrace-gen.h for writing";
+open($fh_retrace_h, '>', 'retrace-ctrls-gen.h') or die "Could not open retrace-ctrls-gen.h for writing";
 printf $fh_retrace_h "/* SPDX-License-Identifier: GPL-2.0-only */\n/*\n * Copyright 2022 Collabora Ltd.\n */\n\n";
-printf $fh_retrace_h "\#ifndef RETRACE_GEN_H\n";
-printf $fh_retrace_h "\#define RETRACE_GEN_H\n\n";
+printf $fh_retrace_h "\#ifndef RETRACE_CTRLS_GEN_H\n";
+printf $fh_retrace_h "\#define RETRACE_CTRLS_GEN_H\n\n";
 
-open($fh_trace_info_cpp, '>', 'trace-info-gen.cpp') or die "Could not open trace-info-gen.cpp for writing";
-printf $fh_trace_info_cpp "/* SPDX-License-Identifier: GPL-2.0-only */\n/*\n * Copyright 2022 Collabora Ltd.\n */\n\n";
-printf $fh_trace_info_cpp "#include \"v4l2-tracer-common.h\"\n#include \"trace-helper.h\"\n\n";
-
-open($fh_trace_info_h, '>', 'trace-info-gen.h') or die "Could not open trace-info-gen.h for writing";
-printf $fh_trace_info_h "/* SPDX-License-Identifier: GPL-2.0-only */\n/*\n * Copyright 2022 Collabora Ltd.\n */\n\n";
-printf $fh_trace_info_h "\#ifndef TRACE_INFO_GEN_H\n";
-printf $fh_trace_info_h "\#define TRACE_INFO_GEN_H\n\n";
+open($fh_common_info_h, '>', 'v4l2-tracer-info-gen.h') or die "Could not open v4l2-tracer-info-gen.h for writing";
+printf $fh_common_info_h "/* SPDX-License-Identifier: GPL-2.0-only */\n/*\n * Copyright 2022 Collabora Ltd.\n */\n\n";
+printf $fh_common_info_h "\#ifndef V4L2_TRACER_INFO_GEN_H\n";
+printf $fh_common_info_h "\#define V4L2_TRACER_INFO_GEN_H\n\n";
+printf $fh_common_info_h "#include \"v4l2-tracer-common.h\"\n\n";
 
 $in_v4l2_controls = true;
 
 while (<>) {
 	if (grep {/#define __LINUX_VIDEODEV2_H/} $_) {$in_v4l2_controls = false;}
 
-	# only generate flag and struct functions for v4l2-controls.h
-	if ($in_v4l2_controls eq true) {
-		if (grep {/^#define.+_FLAG_.+/} $_) {
-			flag_gen();
-		} elsif (grep {/^#define.+FWHT_FL_.+/} $_) {
-			flag_gen("fwht");
-		} elsif (grep {/^#define V4L2_VP8_LF.*/} $_) {
-			flag_gen("vp8_loop_filter");
-		}
+	if (grep {/^#define.+_FLAG_.+/} $_) {
+		flag_gen();
+	} elsif (grep {/^#define.+FWHT_FL_.+/} $_) {
+		flag_gen("fwht");
+	} elsif (grep {/^#define V4L2_VP8_LF.*/} $_) {
+		flag_gen("vp8_loop_filter");
+	}
 
+	# only generate struct functions for v4l2-controls.h
+	if ($in_v4l2_controls eq true) {
 		if (grep {/^struct/} $_) {
 			struct_gen();
 		}
 	}
 
 	if (grep {/^\/\* Control classes \*\//} $_) {
-		printf $fh_trace_info_cpp "std::string ctrlclass2s(__u32 id)\n{\n";
-		printf $fh_trace_info_h "std::string ctrlclass2s(__u32 id);\n";
-		printf $fh_trace_info_cpp "\tstatic constexpr definition defs[] = {\n";
+		printf $fh_common_info_h "constexpr val_def ctrlclass_val_def[] = {\n";
 
 		while (<>) {
 			last if $_ =~ /^\s*$/; #last if blank line
 			($ctrl_class) = ($_) =~ /#define\s*(\w+)\s+.*/;
-			printf $fh_trace_info_cpp "\t\t{ %s,\t\"%s\" },\n", $ctrl_class, $ctrl_class;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $ctrl_class, $ctrl_class;
 		}
-		printf $fh_trace_info_cpp "\t\t{ 0, nullptr }\n\t};\n\treturn val2s(id & 0xff0000, defs);\n}\n\n";
+		printf $fh_common_info_h "\t{ 0, nullptr }\n};\n\n";
+	}
+
+	if (grep {/^enum v4l2_buf_type/} $_) {
+		printf $fh_common_info_h "constexpr val_def buf_type_val_def[] = {\n";
+		while (<>) {
+			last if $_ =~ /\/?\s?\*.*/; # Stop at /* Deprecated, do not use */
+			($buf_type) = ($_) =~ /\s*(\w+)\s+.*/;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $buf_type, $buf_type;
+		}
+		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
 	}
 
 	if (grep {/^enum v4l2_memory/} $_) {
-		printf $fh_trace_info_cpp "std::string v4l2_memory2s(__u32 val)\n{\n";
-		printf $fh_trace_info_h "std::string v4l2_memory2s(__u32 val);\n";
-		printf $fh_trace_info_cpp "\tstatic constexpr definition defs[] = {\n";
+		printf $fh_common_info_h "constexpr val_def defs_memory_type[] = {\n";
 
 		while (<>) {
 			last if $_ =~ /};/;
 			($memory_type) = ($_) =~ /\s*(\w+)\s+.*/;
-			printf $fh_trace_info_cpp "\t\t{ %s,\t\"%s\" },\n", $memory_type, $memory_type;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $memory_type, $memory_type;
 		}
-		printf $fh_trace_info_cpp "\t\t{ 0, nullptr }\n\t};\n\treturn val2s(val, defs);\n}\n\n";
+		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
 	}
 
 	if (grep {/\/\* Values for 'capabilities' field \*\//} $_) {
-		printf $fh_trace_info_cpp "std::string capabilities2s(unsigned long flag)\n{\n";
-		printf $fh_trace_info_h "std::string capabilities2s(unsigned long flag);\n";
 
-		printf $fh_trace_info_cpp "\tstatic constexpr flag_def def[] = {\n";
+		printf $fh_common_info_h "constexpr flag_def capabilities_flag_def[] = {\n";
 		while (<>) {
 			last if $_ =~ /.*V I D E O   I M A G E   F O R M A T.*/;
 			next if ($_ =~ /^\/?\s?\*.*/); #skip comments
 			next if $_ =~ /^\s*$/; #skip blank lines
 			($cap) = ($_) =~ /#define\s+(\w+)\s+.+/;
-			printf $fh_trace_info_cpp "\t\t{ $cap, \"$cap\" },\n"
+			printf $fh_common_info_h "\t{ $cap, \"$cap\" },\n"
 		}
-		printf $fh_trace_info_cpp "\t\t{ 0, nullptr }\n\t};\n\treturn flags2s(flag, def);\n}\n\n";
+		printf $fh_common_info_h "\t{ 0, nullptr }\n};\n\n";
+	}
+
+	if (grep {/\*      Pixel format         FOURCC                          depth  Description  \*\//} $_) {
+		printf $fh_common_info_h "constexpr val_def defs_pixfmt[] = {\n";
+		while (<>) {
+			last if $_ =~ /.*SDR formats - used only for Software Defined Radio devices.*/;
+			next if ($_ =~ /^\s*\/\*.*/); #skip comments
+			next if $_ =~ /^\s*$/; #skip blank lines
+			($pixfmt) = ($_) =~ /#define (\w+)\s+.*/;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $pixfmt, $pixfmt;
+		}
+		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
 	}
 
 	if (grep {/^enum v4l2_ctrl_type/} $_) {
-		printf $fh_trace_info_cpp "std::string ctrltype2s(__u32 val)\n{\n";
-		printf $fh_trace_info_h "std::string ctrltype2s(__u32 val);\n";
-		printf $fh_trace_info_cpp "\tstatic constexpr definition defs[] = {\n";
+		printf $fh_common_info_h "constexpr val_def ctrl_type_val_def[] = {\n";
 
 		while (<>) {
 			next if ($_ =~ /^\s?\/?\s?\*.*/); #skip comments
@@ -307,15 +326,13 @@ while (<>) {
 			last if $_ =~ /};/;
 			($ctrl_type) = ($_) =~ /\s*(\w+)\s+.*/;
 
-			printf $fh_trace_info_cpp "\t\t{ %s,\t\"%s\" },\n", $ctrl_type, $ctrl_type;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $ctrl_type, $ctrl_type;
 		}
-		printf $fh_trace_info_cpp "\t\t{ 0, nullptr }\n\t};\n\treturn val2s(val, defs);\n}\n\n";
+		printf $fh_common_info_h "\t{ 0, nullptr }\n};\n\n";
 	}
 
 	if (grep {/.*I O C T L   C O D E S   F O R   V I D E O   D E V I C E S.*/} $_) {
-		printf $fh_trace_info_cpp "std::string ioctl2s_video(unsigned long request)\n{\n";
-		printf $fh_trace_info_h "std::string ioctl2s_video(unsigned long request);\n";
-		printf $fh_trace_info_cpp "\tstatic constexpr definition defs[] = {\n";
+		printf $fh_common_info_h "constexpr val_def defs_ioctl_video[] = {\n";
 
 		while (<>) {
 			next if ($_ =~ /^\/?\s?\*.*/); #skip comments
@@ -323,16 +340,14 @@ while (<>) {
 			next if $_ =~ /^\s+/; #skip lines that start with a space
 			last if $_ =~ /^#define BASE_VIDIOC_PRIVATE/;
 			($ioctl_name) = ($_) =~ /^#define\s*(\w+)\s*/;
-			printf $fh_trace_info_cpp "\t\t{ %s,\t\"%s\" },\n", $ioctl_name, $ioctl_name;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $ioctl_name, $ioctl_name;
 		}
-		printf $fh_trace_info_cpp "\t\t{ 0, nullptr }\n\t};\n\treturn val2s(request, defs);\n}\n\n";
+		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
 	}
 
 	# from media.h
 	if (grep {/\/\* ioctls \*\//} $_) {
-		printf $fh_trace_info_cpp "std::string ioctl2s_media(unsigned long request)\n{\n";
-		printf $fh_trace_info_h "std::string ioctl2s_media(unsigned long request);\n";
-		printf $fh_trace_info_cpp "\tstatic constexpr definition defs[] = {\n";
+		printf $fh_common_info_h "constexpr val_def defs_ioctl_media[] = {\n";
 
 		while (<>) {
 			next if ($_ =~ /^\/?\s?\*.*/); #skip comments
@@ -340,9 +355,9 @@ while (<>) {
 			next if $_ =~ /^\s+/; #skip lines that start with a space, comments
 			last if $_ =~ /^#define MEDIA_ENT_TYPE_SHIFT/;
 			($ioctl_name) = ($_) =~ /^#define\s*(\w+)\s*/;
-			printf $fh_trace_info_cpp "\t\t{ %s,\t\"%s\" },\n", $ioctl_name, $ioctl_name;
+			printf $fh_common_info_h "\t\t{ %s,\t\"%s\" },\n", $ioctl_name, $ioctl_name;
 		}
-		printf $fh_trace_info_cpp "\t\t{ 0, nullptr }\n\t};\n\treturn val2s(request, defs);\n}\n\n";
+		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n";
 	}
 }
 
@@ -354,6 +369,5 @@ printf $fh_retrace_h "\n#endif\n";
 close $fh_retrace_h;
 close $fh_retrace_cpp;
 
-printf $fh_trace_info_h "\n#endif\n";
-close $fh_trace_info_h;
-close $fh_trace_info_cpp;
+printf $fh_common_info_h "\n#endif\n";
+close $fh_common_info_h;

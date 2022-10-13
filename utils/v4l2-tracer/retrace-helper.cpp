@@ -3,6 +3,8 @@
  * Copyright 2022 Collabora Ltd.
  */
 
+#include <sstream> //   ?
+#include <vector> ///?
 #include "v4l2-tracer-common.h"
 
 struct buffer_retrace {
@@ -29,6 +31,140 @@ static struct retrace_context ctx_retrace = {
 	.lock = PTHREAD_MUTEX_INITIALIZER
 };
 
+unsigned long s2flags(std::string s, const flag_def *def)
+{
+	size_t idx;
+
+	unsigned long val = 0;
+
+	while (def->flag) {
+		idx = s.find(def->str);
+		if (idx != std::string::npos) {
+
+			/* Special treatment for flag values that have an offset. */
+			std::string temp = def->str;
+			if (temp == "V4L2_FWHT_FL_COMPONENTS_NUM_MSK") {
+				val += (def->flag & (2 << V4L2_FWHT_FL_COMPONENTS_NUM_OFFSET));
+			} else if (temp == "V4L2_FWHT_FL_PIXENC_MSK") {
+				val += (def->flag & (1 << V4L2_FWHT_FL_PIXENC_OFFSET));
+			} else {
+				val += def->flag;
+			}
+
+			/* erase the portion of the string that has been found including the separators */
+			s.erase(idx, strlen(def->str));
+			idx = s.find(", ");
+			if (idx != std::string::npos)
+				s.erase(idx, 2);
+		}
+		def++;
+	}
+
+	if (s.empty())
+		return val;
+
+	fprintf(stderr, "Warning: unrecognized flags: \'%s\'\n", s.c_str());
+
+	/* Handle unrecognized flags. */
+	std::stringstream ss(s);
+	std::vector<std::string> unknown_flags;
+	std::string flag_str;
+	while (ss >> flag_str)
+		unknown_flags.push_back(flag_str);
+
+	for (unsigned long i = 0; i < unknown_flags.size(); i++) {
+
+		/* remove any separators */
+		idx = unknown_flags[i].find(",");
+		if (idx != std::string::npos) {
+			unknown_flags[i].erase(idx, 1);
+		}
+
+		/* unknown flags in hex */
+		idx = unknown_flags[i].find("0x");
+		if (idx != std::string::npos) {
+			try {
+				val += std::stoul(unknown_flags[i], nullptr, 16);
+			} catch (std::invalid_argument& ia) {
+				fprintf(stderr, "Warning: \'%s\' is invalid.\n", unknown_flags[i].c_str());
+			} catch (std::out_of_range& oor) {
+				fprintf(stderr, "Warning: \'%s\' is out of range for a value.\n", unknown_flags[i].c_str());
+			}
+			continue;
+		}
+
+		/* test if unknown flag is a decimal */
+		try {
+			val += std::stoul(unknown_flags[i], nullptr, 10);
+		} catch (std::invalid_argument& ia) {
+			fprintf(stderr, "Warning: \'%s\' can't be converted to a flag value.\n", unknown_flags[i].c_str());
+			continue;
+		} catch (std::out_of_range& oor) {
+			fprintf(stderr, "Warning: \'%s\' is out of range for a flag value.\n", unknown_flags[i].c_str());
+			continue;
+		}
+	}
+
+	return val;
+}
+
+unsigned long s2val(std::string s, const val_def *def, bool ioctl)
+{
+	unsigned long val = 0;
+
+	if (s.empty())
+		return val;
+
+	while (def->val != 0) {
+		if (def->str == s) {
+			val = def->val;
+			return val;
+		}
+		def++;
+	}
+
+	/* Handle unrecognized value. */
+	if (!ioctl)
+		fprintf(stderr, "Warning: \'%s\' unrecognized.\n", s.c_str());
+
+	size_t idx;
+	idx = s.find("0x");
+	if (idx != std::string::npos) {
+		try {
+			val = std::stoul(s, nullptr, 16);
+		} catch (std::invalid_argument& ia) {
+			fprintf(stderr, "Warning: \'%s\' is invalid.\n", s.c_str());
+		} catch (std::out_of_range& oor) {
+			fprintf(stderr, "Warning: \'%s\' is out of range for a value.\n", s.c_str());
+		}
+		return val;
+	}
+
+	try {
+		val = std::stoul(s, nullptr, 10);
+	} catch (std::invalid_argument& ia) {
+		if (!ioctl)
+			fprintf(stderr, "Warning: \'%s\' is invalid.\n", s.c_str());
+	} catch (std::out_of_range& oor) {
+		fprintf(stderr, "Warning: \'%s\' is out of range for a value.\n", s.c_str());
+	}
+	return val;
+}
+
+unsigned long s2ioctl(std::string s)
+{
+	unsigned long val = 0;
+
+	val = s2val(s, defs_ioctl_video, true);
+	if (!val)
+		val = s2val(s, defs_ioctl_media, true);
+
+	if (!val || ioctl2s(val).empty())
+		fprintf(stderr, "Warning: unrecognized ioctl value: \'%s\'\n", s.c_str());
+
+	return val;
+}
+
 bool buffer_in_retrace_context(int fd, __u32 offset)
 {
 	bool buffer_in_retrace_context = false;
@@ -45,7 +181,7 @@ bool buffer_in_retrace_context(int fd, __u32 offset)
 
 int get_buffer_fd_retrace(__u32 type, __u32 index)
 {
-	int fd = 0;
+	int fd = 0;  ///can i change to -1?    why is this 0?
 	pthread_mutex_lock(&ctx_retrace.lock);
 	for (auto &b : ctx_retrace.buffers) {
 		if ((b.type == type) && (b.index == index)) {
@@ -133,7 +269,7 @@ void add_fd(int fd_trace, int fd_retrace)
 
 int get_fd_retrace_from_fd_trace(int fd_trace)
 {
-	int fd_retrace = 0;
+	int fd_retrace = 0;  //can be -1?   
 	std::unordered_map<int, int>::const_iterator it;
 
 	pthread_mutex_lock(&ctx_retrace.lock);

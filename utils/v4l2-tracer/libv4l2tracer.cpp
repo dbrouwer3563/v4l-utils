@@ -15,7 +15,7 @@ void trace_mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t o
                 unsigned long buf_address, bool is_mmap64);
 void trace_mem(int fd, __u32 offset, __u32 type, int index, __u32 bytesused, unsigned long start);
 void trace_mem_encoded(int fd, __u32 offset);
-json_object *trace_ioctl_args(int fd, unsigned long request, void *arg,
+json_object *trace_ioctl_args(int fd, unsigned long cmd, void *arg,
                               bool from_userspace = true);
 
 int open(const char *path, int oflag, ...)
@@ -77,8 +77,7 @@ int close(int fd)
 	/* Only trace the close if a corresponding open was also traced. */
 	if (!path.empty()) {
 		json_object *close_obj = json_object_new_object();
-		json_object_object_add(close_obj, "syscall_str", json_object_new_string("close"));
-		json_object_object_add(close_obj, "syscall", json_object_new_int(LIBTRACER_SYSCALL_CLOSE));
+		json_object_object_add(close_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_CLOSE, defs_libv4l2tracer_syscall).c_str()));
 		json_object_object_add(close_obj, "fd", json_object_new_int(fd));
 		json_object_object_add(close_obj, "path", json_object_new_string(path.c_str()));
 		write_json_object_to_json_file(close_obj);
@@ -138,13 +137,10 @@ int munmap(void *start, size_t length)
 		return ret;
 
 	json_object *munmap_obj = json_object_new_object();
-	json_object_object_add(munmap_obj, "syscall_str", json_object_new_string("munmap"));
-	json_object_object_add(munmap_obj, "syscall", json_object_new_int(LIBTRACER_SYSCALL_MUNMAP));
+	json_object_object_add(munmap_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_MUNMAP, defs_libv4l2tracer_syscall).c_str()));
 
-	if (errno) {
-		json_object_object_add(munmap_obj, "errno", json_object_new_int(errno));
-		json_object_object_add(munmap_obj, "errno_str", json_object_new_string(strerror(errno)));
-	}
+	if (errno)
+		json_object_object_add(munmap_obj, "errno", json_object_new_string(strerrorname_np(errno)));
 
 	json_object *munmap_args = json_object_new_object();
 	json_object_object_add(munmap_args, "start", json_object_new_int64((int64_t)start));
@@ -157,65 +153,65 @@ int munmap(void *start, size_t length)
 	return ret;
 }
 
-int ioctl(int fd, unsigned long request, ...)
+int ioctl(int fd, unsigned long cmd, ...)
 {
 	errno = 0;
 	va_list ap;
-	va_start(ap, request);
+	va_start(ap, cmd);
 	void *arg = va_arg(ap, void *);
 	va_end(ap);
 
-	int (*original_ioctl)(int fd, unsigned long request, ...);
+	int (*original_ioctl)(int fd, unsigned long cmd, ...);
 	original_ioctl = (int (*)(int, long unsigned int, ...)) dlsym(RTLD_NEXT, "ioctl");
 
-	if ((request == VIDIOC_S_EXT_CTRLS) && (_IOC_TYPE(request) == 'V'))
+	/* don't trace ioctls that are not in videodev2.h or media.h */
+	if (ioctl2s(cmd).empty())
+		return (*original_ioctl)(fd, cmd, arg);
+
+	if (cmd == VIDIOC_S_EXT_CTRLS)
 		s_ext_ctrls_setup(static_cast<struct v4l2_ext_controls*>(arg));
 
-	if ((request == VIDIOC_QBUF) && (_IOC_TYPE(request) == 'V'))
+	if (cmd == VIDIOC_QBUF)
 		qbuf_setup(static_cast<struct v4l2_buffer*>(arg));
 
-	if ((request == VIDIOC_STREAMOFF) && (_IOC_TYPE(request) == 'V'))
+	if (cmd == VIDIOC_STREAMOFF)
 		streamoff_cleanup(*(static_cast<v4l2_buf_type*>(arg)));
 
 	json_object *ioctl_obj = json_object_new_object();
-	json_object_object_add(ioctl_obj, "syscall_str", json_object_new_string("ioctl"));
-	json_object_object_add(ioctl_obj, "syscall", json_object_new_int(LIBTRACER_SYSCALL_IOCTL));
+	json_object_object_add(ioctl_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_IOCTL, defs_libv4l2tracer_syscall).c_str()));
 	json_object_object_add(ioctl_obj, "fd", json_object_new_int(fd));
-	json_object_object_add(ioctl_obj, "request", json_object_new_uint64(request));
-	json_object_object_add(ioctl_obj, "request_str",
-	                       json_object_new_string(get_ioctl_request_str(request).c_str()));
+	json_object_object_add(ioctl_obj, "cmd", json_object_new_string(ioctl2s(cmd).c_str()));
+
 
 	/* Trace the ioctl arguments provided by userspace. */
-	json_object *ioctl_args_userspace = trace_ioctl_args(fd, request, arg);
+	json_object *ioctl_args_userspace = trace_ioctl_args(fd, cmd, arg);
 	if (json_object_object_length(ioctl_args_userspace))
-		json_object_object_add(ioctl_obj, "ioctl_args_from_userspace", ioctl_args_userspace);
+		json_object_object_add(ioctl_obj, "from_userspace", ioctl_args_userspace);
 
 	/* Make the original ioctl call. */
-	int ret = (*original_ioctl)(fd, request, arg);
+	int ret = (*original_ioctl)(fd, cmd, arg);
 
-	if (errno) {
-		json_object_object_add(ioctl_obj, "errno", json_object_new_int(errno));
-		json_object_object_add(ioctl_obj, "errno_str", json_object_new_string(strerror(errno)));
-	}
+	if (errno)
+		json_object_object_add(ioctl_obj, "errno", json_object_new_string(strerrorname_np(errno)));
 
 	/* Also trace the ioctl arguments as modified by the driver. */
-	json_object *ioctl_args_driver = trace_ioctl_args(fd, request, arg, false);
+	json_object *ioctl_args_driver = trace_ioctl_args(fd, cmd, arg, false);
 	if (json_object_object_length(ioctl_args_driver))
-		json_object_object_add(ioctl_obj, "ioctl_args_from_driver", ioctl_args_driver);
+		json_object_object_add(ioctl_obj, "from_driver", ioctl_args_driver);
 
 	write_json_object_to_json_file(ioctl_obj);
 	json_object_put(ioctl_obj);
 
-	if ((request == VIDIOC_G_FMT) && (_IOC_TYPE(request) == 'V'))
+	if (cmd == VIDIOC_G_FMT)
 		g_fmt_setup_trace(static_cast<struct v4l2_format*>(arg));
 
-	if ((request == VIDIOC_S_FMT) && (_IOC_TYPE(request) == 'V'))
+	if (cmd == VIDIOC_S_FMT)
 		s_fmt_setup(static_cast<struct v4l2_format*>(arg));
 
-	if ((request == VIDIOC_EXPBUF) && (_IOC_TYPE(request) == 'V'))
+	if (cmd == VIDIOC_EXPBUF)
 		expbuf_setup(static_cast<struct v4l2_exportbuffer*>(arg));
 
-	if ((request == VIDIOC_QUERYBUF) && (_IOC_TYPE(request) == 'V'))
+	if (cmd == VIDIOC_QUERYBUF)
 		querybuf_setup(fd, static_cast<struct v4l2_buffer*>(arg));
 
 	return ret;

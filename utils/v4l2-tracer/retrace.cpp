@@ -4,20 +4,8 @@
  */
 #include <stdexcept>
 #include "v4l2-tracer-common.h"
-#include "retrace-gen.h"
-
-bool buffer_in_retrace_context(int fd, __u32 offset = 0);
-int get_buffer_fd_retrace(__u32 type, __u32 index);
-void add_buffer_retrace(int fd, __u32 type, __u32 index, __u32 offset = 0);
-void remove_buffer_retrace(int fd);
-void set_buffer_address_retrace(int fd, __u32 offset, long address_trace, long address_retrace);
-long get_retrace_address_from_trace_address(long address_trace);
-void add_fd(int fd_trace, int fd_retrace);
-int get_fd_retrace_from_fd_trace(int fd_trace);
-void remove_fd(int fd_trace);
-void set_pixelformat_retrace(__u32 width, __u32 height, __u32 pixelformat);
-unsigned get_expected_length_retrace(void);
-void print_context(void);
+#include "retrace-helper.h"
+#include "retrace-ctrls-gen.h"
 
 bool verbose = false;
 std::string retrace_filename;
@@ -219,11 +207,11 @@ struct v4l2_requestbuffers retrace_v4l2_requestbuffers(json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(requestbuffers_obj, "type", &type_obj);
-	request_buffers.type = json_object_get_int(type_obj);
+	request_buffers.type = s2val(json_object_get_string(type_obj), buf_type_val_def);
 
 	json_object *memory_obj;
 	json_object_object_get_ex(requestbuffers_obj, "memory", &memory_obj);
-	request_buffers.memory = json_object_get_int(memory_obj);
+	request_buffers.memory = s2val(json_object_get_string(memory_obj), defs_memory_type);
 
 	json_object *capabilities_obj;
 	json_object_object_get_ex(requestbuffers_obj, "capabilities", &capabilities_obj);
@@ -245,7 +233,7 @@ void retrace_vidioc_reqbufs(int fd_retrace, json_object *ioctl_args)
 	if (verbose || (errno != 0)) {
 		perror("VIDIOC_REQBUFS");
 		fprintf(stderr, "type: %s, request_buffers.count: %d\n",
-		        buftype2s(request_buffers.type).c_str(), request_buffers.count);
+		        buftype2s(request_buffers.type).c_str(), request_buffers.count);     //fix
 		print_context();
 	}
 }
@@ -290,7 +278,7 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(buf_obj, "type", &type_obj);
-	buf->type = (__u32) json_object_get_uint64(type_obj);
+	buf->type = s2val(json_object_get_string(type_obj), buf_type_val_def);
 
 	json_object *bytesused_obj;
 	json_object_object_get_ex(buf_obj, "bytesused", &bytesused_obj);
@@ -322,7 +310,7 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 
 	json_object *memory_obj;
 	json_object_object_get_ex(buf_obj, "memory", &memory_obj);
-	buf->memory = (__u32) json_object_get_uint64(memory_obj);
+	buf->memory = s2val(json_object_get_string(memory_obj), defs_memory_type);
 
 	json_object *length_obj;
 	json_object_object_get_ex(buf_obj, "length", &length_obj);
@@ -441,7 +429,7 @@ struct v4l2_exportbuffer retrace_v4l2_exportbuffer(json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(exportbuffer_obj, "type", &type_obj);
-	export_buffer.type = json_object_get_int(type_obj);
+	export_buffer.type = s2val(json_object_get_string(type_obj), buf_type_val_def);
 
 	json_object *index_obj;
 	json_object_object_get_ex(exportbuffer_obj, "index", &index_obj);
@@ -491,7 +479,7 @@ void retrace_vidioc_expbuf(int fd_retrace, json_object *ioctl_args_user, json_ob
 
 	if (verbose || (errno != 0)) {
 		perror("VIDIOC_EXPBUF");
-		fprintf(stderr, "type: %s \n", buftype2s(export_buffer.type).c_str());
+		fprintf(stderr, "type: %s \n", buftype2s(export_buffer.type).c_str()); /// fix         
 		fprintf(stderr, "index: %d, fd: %d\n", export_buffer.index, buf_fd_retrace);
 		print_context();
 	}
@@ -534,29 +522,29 @@ void retrace_vidioc_dqbuf(int fd_retrace, json_object *ioctl_args_user)
 
 void retrace_vidioc_streamon(int fd_retrace, json_object *ioctl_args)
 {
-	json_object *buf_type_obj;
-	json_object_object_get_ex(ioctl_args, "buf_type", &buf_type_obj);
-	v4l2_buf_type buf_type = (v4l2_buf_type) json_object_get_int(buf_type_obj);
+	json_object *type_obj;
+	json_object_object_get_ex(ioctl_args, "type", &type_obj);
+	v4l2_buf_type buf_type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), buf_type_val_def);
 
 	ioctl(fd_retrace, VIDIOC_STREAMON, &buf_type);
 
 	if (verbose || (errno != 0)) {
 		perror("VIDIOC_STREAMON");
-		fprintf(stderr, "buftype: %s\n\n", buftype2s(buf_type).c_str());
+		fprintf(stderr, "buftype: %s\n\n", buftype2s(buf_type).c_str()); ////fix   
 	}
 }
 
 void retrace_vidioc_streamoff(int fd_retrace, json_object *ioctl_args)
 {
-	json_object *buf_type_obj;
-	json_object_object_get_ex(ioctl_args, "buf_type", &buf_type_obj);
-	v4l2_buf_type buf_type = (v4l2_buf_type) json_object_get_int(buf_type_obj);
+	json_object *type_obj;
+	json_object_object_get_ex(ioctl_args, "type", &type_obj);
+	v4l2_buf_type buf_type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), buf_type_val_def);
 
 	ioctl(fd_retrace, VIDIOC_STREAMOFF, &buf_type);
 
 	if (verbose || (errno != 0)) {
 		perror("VIDIOC_STREAMOFF");
-		fprintf(stderr, "buftype: %s\n", buftype2s(buf_type).c_str());
+		fprintf(stderr, "buftype: %s\n", buftype2s(buf_type).c_str()); ///////fix 
 		fprintf(stderr, "\n");
 	}
 }
@@ -598,7 +586,7 @@ struct v4l2_pix_format_mplane retrace_v4l2_pix_format_mplane(json_object *v4l2_f
 
 	json_object *pixelformat_obj;
 	json_object_object_get_ex(pix_mp_obj, "pixelformat", &pixelformat_obj);
-	pix_mp.pixelformat = json_object_get_int(pixelformat_obj);
+	pix_mp.pixelformat = s2val(json_object_get_string(pixelformat_obj), defs_pixfmt);
 
 	json_object *field_obj;
 	json_object_object_get_ex(pix_mp_obj, "field", &field_obj);
@@ -643,11 +631,13 @@ struct v4l2_format retrace_v4l2_format(json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(v4l2_format_obj, "type", &type_obj);
-	format.type = json_object_get_int(type_obj);
+	format.type = s2val(json_object_get_string(type_obj), buf_type_val_def);
 
 	switch (format.type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+	//why not trace format for single planar?                   
+		break;
 	case V4L2_BUF_TYPE_VIDEO_OVERLAY:
 	case V4L2_BUF_TYPE_VBI_CAPTURE:
 	case V4L2_BUF_TYPE_VBI_OUTPUT:
@@ -725,70 +715,68 @@ struct v4l2_ext_control retrace_v4l2_ext_control(json_object *ext_controls_obj, 
 	json_object_object_get_ex(ctrl_obj, "size", &size_obj);
 	ctrl.size = json_object_get_int64(size_obj);
 
-	if ((ctrl.id & V4L2_CID_CODEC_STATELESS_BASE) == V4L2_CID_CODEC_STATELESS_BASE) {
-		switch (ctrl.id) {
-		case V4L2_CID_STATELESS_VP8_FRAME:
-			ctrl.ptr = retrace_v4l2_ctrl_vp8_frame_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_H264_DECODE_MODE:
-		case V4L2_CID_STATELESS_H264_START_CODE:
-			ctrl.value = retrace_v4l2_ext_control_value(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_H264_SPS:
-			ctrl.ptr = retrace_v4l2_ctrl_h264_sps_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_H264_PPS:
-			ctrl.ptr = retrace_v4l2_ctrl_h264_pps_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_H264_SCALING_MATRIX:
-			ctrl.ptr = retrace_v4l2_ctrl_h264_scaling_matrix_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_H264_PRED_WEIGHTS:
-			ctrl.ptr = retrace_v4l2_ctrl_h264_pred_weights_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_H264_SLICE_PARAMS:
-			ctrl.ptr = retrace_v4l2_ctrl_h264_slice_params_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_H264_DECODE_PARAMS:
-			ctrl.ptr = retrace_v4l2_ctrl_h264_decode_params_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_FWHT_PARAMS:
-			ctrl.ptr = retrace_v4l2_ctrl_fwht_params_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_VP9_FRAME:
-			ctrl.ptr = retrace_v4l2_ctrl_vp9_frame_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_VP9_COMPRESSED_HDR:
-			ctrl.ptr = retrace_v4l2_ctrl_vp9_compressed_hdr_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_HEVC_SPS:
-			ctrl.ptr = retrace_v4l2_ctrl_hevc_sps_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_HEVC_PPS:
-			ctrl.ptr = retrace_v4l2_ctrl_hevc_pps_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_HEVC_SLICE_PARAMS:
-			ctrl.ptr = retrace_v4l2_ctrl_hevc_slice_params_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_HEVC_SCALING_MATRIX:
-			ctrl.ptr = retrace_v4l2_ctrl_hevc_scaling_matrix_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_HEVC_DECODE_PARAMS:
-			ctrl.ptr = retrace_v4l2_ctrl_hevc_decode_params_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_MPEG2_SEQUENCE:
-			ctrl.ptr = retrace_v4l2_ctrl_mpeg2_sequence_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_MPEG2_PICTURE:
-			ctrl.ptr = retrace_v4l2_ctrl_mpeg2_picture_gen(ctrl_obj);
-			break;
-		case V4L2_CID_STATELESS_MPEG2_QUANTISATION:
-			ctrl.ptr = retrace_v4l2_ctrl_mpeg2_quantisation_gen(ctrl_obj);
-			break;
-		default:
-			fprintf(stderr, "Unknown control: %d\n", ctrl.id);
-			break;
-		}
+	switch (ctrl.id) {
+	case V4L2_CID_STATELESS_VP8_FRAME:
+		ctrl.ptr = retrace_v4l2_ctrl_vp8_frame_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_H264_DECODE_MODE:
+	case V4L2_CID_STATELESS_H264_START_CODE:
+		ctrl.value = retrace_v4l2_ext_control_value(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_H264_SPS:
+		ctrl.ptr = retrace_v4l2_ctrl_h264_sps_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_H264_PPS:
+		ctrl.ptr = retrace_v4l2_ctrl_h264_pps_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_H264_SCALING_MATRIX:
+		ctrl.ptr = retrace_v4l2_ctrl_h264_scaling_matrix_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_H264_PRED_WEIGHTS:
+		ctrl.ptr = retrace_v4l2_ctrl_h264_pred_weights_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_H264_SLICE_PARAMS:
+		ctrl.ptr = retrace_v4l2_ctrl_h264_slice_params_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_H264_DECODE_PARAMS:
+		ctrl.ptr = retrace_v4l2_ctrl_h264_decode_params_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_FWHT_PARAMS:
+		ctrl.ptr = retrace_v4l2_ctrl_fwht_params_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_VP9_FRAME:
+		ctrl.ptr = retrace_v4l2_ctrl_vp9_frame_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_VP9_COMPRESSED_HDR:
+		ctrl.ptr = retrace_v4l2_ctrl_vp9_compressed_hdr_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_HEVC_SPS:
+		ctrl.ptr = retrace_v4l2_ctrl_hevc_sps_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_HEVC_PPS:
+		ctrl.ptr = retrace_v4l2_ctrl_hevc_pps_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_HEVC_SLICE_PARAMS:
+		ctrl.ptr = retrace_v4l2_ctrl_hevc_slice_params_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_HEVC_SCALING_MATRIX:
+		ctrl.ptr = retrace_v4l2_ctrl_hevc_scaling_matrix_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_HEVC_DECODE_PARAMS:
+		ctrl.ptr = retrace_v4l2_ctrl_hevc_decode_params_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_MPEG2_SEQUENCE:
+		ctrl.ptr = retrace_v4l2_ctrl_mpeg2_sequence_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_MPEG2_PICTURE:
+		ctrl.ptr = retrace_v4l2_ctrl_mpeg2_picture_gen(ctrl_obj);
+		break;
+	case V4L2_CID_STATELESS_MPEG2_QUANTISATION:
+		ctrl.ptr = retrace_v4l2_ctrl_mpeg2_quantisation_gen(ctrl_obj);
+		break;
+	default:
+		fprintf(stderr, "Unknown control: %d\n", ctrl.id);
+		break;
 	}
 	return ctrl;
 }
@@ -876,7 +864,7 @@ void retrace_vidioc_enum_fmt(int fd_retrace, json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(v4l2_fmtdesc_obj, "type", &type_obj);
-	fmtdesc.type = json_object_get_int(type_obj);
+	fmtdesc.type = s2val(json_object_get_string(type_obj), buf_type_val_def);
 
 	json_object *mbus_code_obj;
 	json_object_object_get_ex(v4l2_fmtdesc_obj, "mbus_code", &mbus_code_obj);
@@ -887,7 +875,7 @@ void retrace_vidioc_enum_fmt(int fd_retrace, json_object *ioctl_args)
 	if (verbose) {
 		perror("VIDIOC_ENUM_FMT");
 		fprintf(stderr, "index: %u\n", fmtdesc.index);
-		fprintf(stderr, "type: %u\n", fmtdesc.type);
+		fprintf(stderr, "type: %u\n", fmtdesc.type); ////fix     
 		fprintf(stderr, "flags: %u\n", fmtdesc.flags);
 		fprintf(stderr, "description: %s\n", fmtdesc.description);
 		fprintf(stderr, "pixelformat: %u\n", fmtdesc.pixelformat);
@@ -940,9 +928,9 @@ void retrace_dma_buf_ioctl_sync(int fd_retrace, json_object *ioctl_args_user)
 		perror("DMA_BUF_IOCTL_SYNC");
 }
 
-void retrace_ioctl_media(int fd_retrace, long request, json_object *ioctl_args_driver)
+void retrace_ioctl_media(int fd_retrace, long cmd, json_object *ioctl_args_driver)
 {
-	switch (request){
+	switch (cmd) {
 	case MEDIA_IOC_DEVICE_INFO:
 	case MEDIA_IOC_ENUM_ENTITIES:
 	case MEDIA_IOC_ENUM_LINKS:
@@ -974,9 +962,9 @@ void retrace_ioctl_media(int fd_retrace, long request, json_object *ioctl_args_d
 	}
 }
 
-void retrace_ioctl_video(int fd_retrace, long request, json_object *ioctl_args_user, json_object *ioctl_args_driver)
+void retrace_ioctl_video(int fd_retrace, long cmd, json_object *ioctl_args_user, json_object *ioctl_args_driver)
 {
-	switch (request) {
+	switch (cmd) {
 	case VIDIOC_QUERYCAP:
 		retrace_vidioc_querycap(fd_retrace);
 		break;
@@ -1025,33 +1013,33 @@ void retrace_ioctl(json_object *syscall_obj)
 {
 	int fd_retrace = 0;
 	__u8 ioctl_type = 0;
-	long request = 0;
+	long cmd = 0;
 
 	json_object *fd_trace_obj;
 	json_object_object_get_ex(syscall_obj, "fd", &fd_trace_obj);
 	fd_retrace = get_fd_retrace_from_fd_trace(json_object_get_int(fd_trace_obj));
 
-	json_object *request_obj;
-	json_object_object_get_ex(syscall_obj, "request", &request_obj);
-	request = json_object_get_int64(request_obj);
+	json_object *cmd_obj;
+	json_object_object_get_ex(syscall_obj, "cmd", &cmd_obj);
+	std::string cmd_str = json_object_get_string(cmd_obj);
 
+	if (cmd_str.empty())
+		return;
+
+	cmd = s2ioctl(cmd_str);
 	json_object *ioctl_args_user;
-	json_object_object_get_ex(syscall_obj, "ioctl_args_from_userspace", &ioctl_args_user);
+	json_object_object_get_ex(syscall_obj, "from_userspace", &ioctl_args_user);
 
 	json_object *ioctl_args_driver;
-	json_object_object_get_ex(syscall_obj, "ioctl_args_from_driver", &ioctl_args_driver);
+	json_object_object_get_ex(syscall_obj, "from_driver", &ioctl_args_driver);
 
-	ioctl_type = _IOC_TYPE(request);
+	ioctl_type = _IOC_TYPE(cmd);
 	switch (ioctl_type) {
 	case 'V':
-		retrace_ioctl_video(fd_retrace, request, ioctl_args_user, ioctl_args_driver);
+		retrace_ioctl_video(fd_retrace, cmd, ioctl_args_user, ioctl_args_driver);
 		break;
 	case '|':
-		retrace_ioctl_media(fd_retrace, request, ioctl_args_driver);
-		break;
-	case 'b':
-		if (request == DMA_BUF_IOCTL_SYNC)
-			retrace_dma_buf_ioctl_sync(fd_retrace, ioctl_args_user);
+		retrace_ioctl_media(fd_retrace, cmd, ioctl_args_driver);
 		break;
 	default:
 		break;
@@ -1126,7 +1114,7 @@ void retrace_mem(json_object *mem_obj)
 {
 	json_object *type_obj;
 	json_object_object_get_ex(mem_obj, "type", &type_obj);
-	v4l2_buf_type type = (v4l2_buf_type) json_object_get_int(type_obj);
+	v4l2_buf_type type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), buf_type_val_def);
 
 	json_object *bytesused_obj;
 	json_object_object_get_ex(mem_obj, "bytesused", &bytesused_obj);
@@ -1166,7 +1154,6 @@ void retrace_object(json_object *jobj)
 {
 	json_object *syscall_obj;
 	int ret = json_object_object_get_ex(jobj, "syscall", &syscall_obj);
-	int syscall = json_object_get_int(syscall_obj);
 
 	/* If the json object doesn't hold a syscall, check if it holds a memory dump. */
 	if (ret == 0) {
@@ -1178,26 +1165,28 @@ void retrace_object(json_object *jobj)
 
 	errno = 0;
 
+	int syscall = s2val(json_object_get_string(syscall_obj), defs_libv4l2tracer_syscall);
+
 	switch (syscall) {
-	case LIBTRACER_SYSCALL_IOCTL:
+	case LIBV4L2TRACER_SYSCALL_IOCTL:
 		retrace_ioctl(jobj);
 		break;
-	case LIBTRACER_SYSCALL_OPEN:
+	case LIBV4L2TRACER_SYSCALL_OPEN:
 		retrace_open(jobj, false);
 		break;
-	case LIBTRACER_SYSCALL_OPEN64:
+	case LIBV4L2TRACER_SYSCALL_OPEN64:
 		retrace_open(jobj, true);
 		break;
-	case LIBTRACER_SYSCALL_CLOSE:
+	case LIBV4L2TRACER_SYSCALL_CLOSE:
 		retrace_close(jobj);
 		break;
-	case LIBTRACER_SYSCALL_MMAP:
+	case LIBV4L2TRACER_SYSCALL_MMAP:
 		retrace_mmap(jobj, false);
 		break;
-	case LIBTRACER_SYSCALL_MMAP64:
+	case LIBV4L2TRACER_SYSCALL_MMAP64:
 		retrace_mmap(jobj, true);
 		break;
-	case LIBTRACER_SYSCALL_MUNMAP:
+	case LIBV4L2TRACER_SYSCALL_MUNMAP:
 		retrace_munmap(jobj);
 		break;
 	default:
@@ -1222,7 +1211,7 @@ int get_options_retrace(int argc, char *argv[])
 	int ch;
 	do {
 		ch = getopt_long(argc, argv, short_options_retracer, long_options_retracer, NULL);
-		switch (ch){
+		switch (ch) {
 		case OptSetDevice_Retracer: {
 			std::string device = optarg;
 			if (device[0] >= '0' && device[0] <= '9' && device.length() <= 3) {

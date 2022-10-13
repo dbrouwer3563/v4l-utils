@@ -49,9 +49,9 @@ void print_help_tracer(void)
 	        "\t-e, --prettymem   Add whitespace in json file to improve readability of memory arrays.\n"
 	        "\t-h, --help        Display trace help.\n"
 	        "\t-p, --pretty      Add whitespace in json file to improve readability.\n"
-	        "\t-r  --raw         Write decoded data to json file.\n"
+	        "\t-r  --raw         Write decoded video frame data to json file.\n"
 	        "\t-v, --verbose     Turn on verbose reporting.\n"
-	        "\t-y, --yuv         Write decoded data to yuv file.\n\n");
+	        "\t-y, --yuv         Write decoded video frame data to yuv file.\n\n");
 }
 
 void print_usage(void)
@@ -66,7 +66,7 @@ void get_options_trace(int argc, char *argv[])
 
 	do {
 		ch = getopt_long(argc, argv, short_options_tracer, long_options_tracer, NULL);
-		switch (ch){
+		switch (ch) {
 		case TracerOptPrettyPrintMemoryOnly:
 			setenv("TRACE_OPTION_PRETTY_PRINT_MEM", "true", 0);
 			break;

@@ -27,14 +27,36 @@
 #include "codec-fwht.h"
 #include "v4l2-info.h"
 
-enum LIBTRACER_SYSCALL {
-	LIBTRACER_SYSCALL_IOCTL,
-	LIBTRACER_SYSCALL_OPEN,
-	LIBTRACER_SYSCALL_OPEN64,
-	LIBTRACER_SYSCALL_CLOSE,
-	LIBTRACER_SYSCALL_MMAP,
-	LIBTRACER_SYSCALL_MMAP64,
-	LIBTRACER_SYSCALL_MUNMAP,
+struct val_def {
+	unsigned long val;
+	const char *str;
+};
+
+/* Use val2s when there is one, unique value expected, otherwise use flags2s. */
+std::string val2s(unsigned long val, const val_def *def);
+std::string ioctl2s(unsigned long cmd);
+
+#include "v4l2-tracer-info-gen.h"
+
+enum LIBV4L2TRACER_SYSCALL {
+	LIBV4L2TRACER_SYSCALL_IOCTL = 1,
+	LIBV4L2TRACER_SYSCALL_OPEN,
+	LIBV4L2TRACER_SYSCALL_OPEN64,
+	LIBV4L2TRACER_SYSCALL_CLOSE,
+	LIBV4L2TRACER_SYSCALL_MMAP,
+	LIBV4L2TRACER_SYSCALL_MMAP64,
+	LIBV4L2TRACER_SYSCALL_MUNMAP,
+};
+
+constexpr val_def defs_libv4l2tracer_syscall[] = {
+	{ LIBV4L2TRACER_SYSCALL_IOCTL,	"ioctl" },
+	{ LIBV4L2TRACER_SYSCALL_OPEN,	"open" },
+	{ LIBV4L2TRACER_SYSCALL_OPEN64,	"open64" },
+	{ LIBV4L2TRACER_SYSCALL_CLOSE,	"close" },
+	{ LIBV4L2TRACER_SYSCALL_MMAP,	"mmap" },
+	{ LIBV4L2TRACER_SYSCALL_MMAP64,	"mmap64" },
+	{ LIBV4L2TRACER_SYSCALL_MUNMAP,	"munmap" },
+	{ 0, "" }
 };
 
 #endif

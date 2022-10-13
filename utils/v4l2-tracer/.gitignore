@@ -1,8 +1,7 @@
-trace-gen.cpp
-trace-gen.h
-retrace-gen.cpp
-retrace-gen.h
-trace-info-gen.cpp
-trace-info-gen.h
+trace-ctrl-gen.cpp
+trace-ctrl-gen.h
+retrace-ctrls-gen.cpp
+retrace-ctrls-gen.h
+v4l2-tracer-info-gen.h
 v4l2-tracer
 v4l2-tracer.1
