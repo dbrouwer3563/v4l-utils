@@ -31,10 +31,16 @@ static struct retrace_context ctx_retrace = {
 	.lock = PTHREAD_MUTEX_INITIALIZER
 };
 
+
+
+/*
+ * Take a comma-separated string of flags and convert into corresponding values from def.
+ * If the flags are unknown but numeric, return their hex values, otherwise return 0.
+ * Reverse of flag2s.
+ */
 unsigned long s2flags(std::string s, const flag_def *def)
 {
 	size_t idx;
-
 	unsigned long val = 0;
 
 	while (def->flag) {
@@ -63,9 +69,7 @@ unsigned long s2flags(std::string s, const flag_def *def)
 	if (s.empty())
 		return val;
 
-	fprintf(stderr, "Warning: unrecognized flags: \'%s\'\n", s.c_str());
-
-	/* Handle unrecognized flags. */
+	/* Try to convert the unrecognized flags to hex values. */
 	std::stringstream ss(s);
 	std::vector<std::string> unknown_flags;
 	std::string flag_str;
@@ -80,87 +84,56 @@ unsigned long s2flags(std::string s, const flag_def *def)
 			unknown_flags[i].erase(idx, 1);
 		}
 
-		/* unknown flags in hex */
-		idx = unknown_flags[i].find("0x");
-		if (idx != std::string::npos) {
-			try {
-				val += std::stoul(unknown_flags[i], nullptr, 16);
-			} catch (std::invalid_argument& ia) {
-				fprintf(stderr, "Warning: \'%s\' is invalid.\n", unknown_flags[i].c_str());
-			} catch (std::out_of_range& oor) {
-				fprintf(stderr, "Warning: \'%s\' is out of range for a value.\n", unknown_flags[i].c_str());
-			}
-			continue;
-		}
-
-		/* test if unknown flag is a decimal */
 		try {
-			val += std::stoul(unknown_flags[i], nullptr, 10);
+			val += std::stoul(unknown_flags[i], nullptr, 0);
 		} catch (std::invalid_argument& ia) {
-			fprintf(stderr, "Warning: \'%s\' can't be converted to a flag value.\n", unknown_flags[i].c_str());
-			continue;
 		} catch (std::out_of_range& oor) {
-			fprintf(stderr, "Warning: \'%s\' is out of range for a flag value.\n", unknown_flags[i].c_str());
-			continue;
 		}
 	}
-
 	return val;
 }
 
-unsigned long s2val(std::string s, const val_def *def, bool ioctl)
+/* If the string is empty, return 0. Otherwise, convert the string to a long and return it or -1 on error. */
+long s2val_hex(std::string s)
 {
-	unsigned long val = 0;
-
 	if (s.empty())
-		return val;
+		return 0;
 
-	while (def->val != 0) {
-		if (def->str == s) {
-			val = def->val;
-			return val;
-		}
-		def++;
-	}
-
-	/* Handle unrecognized value. */
-	if (!ioctl)
-		fprintf(stderr, "Warning: \'%s\' unrecognized.\n", s.c_str());
-
-	size_t idx;
-	idx = s.find("0x");
-	if (idx != std::string::npos) {
-		try {
-			val = std::stoul(s, nullptr, 16);
-		} catch (std::invalid_argument& ia) {
-			fprintf(stderr, "Warning: \'%s\' is invalid.\n", s.c_str());
-		} catch (std::out_of_range& oor) {
-			fprintf(stderr, "Warning: \'%s\' is out of range for a value.\n", s.c_str());
-		}
-		return val;
-	}
-
+	long val = -1;
 	try {
-		val = std::stoul(s, nullptr, 10);
-	} catch (std::invalid_argument& ia) {
-		if (!ioctl)
-			fprintf(stderr, "Warning: \'%s\' is invalid.\n", s.c_str());
-	} catch (std::out_of_range& oor) {
-		fprintf(stderr, "Warning: \'%s\' is out of range for a value.\n", s.c_str());
-	}
+		/* Base is autodetected so also works for octal/decimal. */
+		val = std::stoul(s, nullptr, 0);
+	} catch (std::invalid_argument& ia) {} catch (std::out_of_range& oor) {}
 	return val;
 }
 
-unsigned long s2ioctl(std::string s)
+/*
+ * If the string has a corresponding val in def, return the val.
+ * Otherwise, if the string is empty return 0.
+ * If the string is numeric, convert the string to a long
+ * and return it.
+ */
+long s2val(std::string s, const val_def *def)
 {
-	unsigned long val = 0;
+	if (s.empty())
+		return 0;
 
-	val = s2val(s, defs_ioctl_video, true);
-	if (!val)
-		val = s2val(s, defs_ioctl_media, true);
+	while ((def->val != -1) && (def->str != s))
+		def++;
 
-	if (!val || ioctl2s(val).empty())
-		fprintf(stderr, "Warning: unrecognized ioctl value: \'%s\'\n", s.c_str());
+	if (def->str == s)
+		return def->val;
+
+	return s2val_hex(s);
+}
+
+long s2ioctl(std::string s)
+{
+	long val = -1;
+
+	val = s2val(s, ioctl_video_val_def);
+	if (val == -1)
+		val = s2val(s, ioctl_media_val_def);
 
 	return val;
 }

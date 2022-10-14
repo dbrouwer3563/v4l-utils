@@ -77,7 +77,7 @@ int close(int fd)
 	/* Only trace the close if a corresponding open was also traced. */
 	if (!path.empty()) {
 		json_object *close_obj = json_object_new_object();
-		json_object_object_add(close_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_CLOSE, defs_libv4l2tracer_syscall).c_str()));
+		json_object_object_add(close_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_CLOSE, libv4l2tracer_syscall_val_def).c_str()));
 		json_object_object_add(close_obj, "fd", json_object_new_int(fd));
 		json_object_object_add(close_obj, "path", json_object_new_string(path.c_str()));
 		write_json_object_to_json_file(close_obj);
@@ -137,7 +137,7 @@ int munmap(void *start, size_t length)
 		return ret;
 
 	json_object *munmap_obj = json_object_new_object();
-	json_object_object_add(munmap_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_MUNMAP, defs_libv4l2tracer_syscall).c_str()));
+	json_object_object_add(munmap_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_MUNMAP, libv4l2tracer_syscall_val_def).c_str()));
 
 	if (errno)
 		json_object_object_add(munmap_obj, "errno", json_object_new_string(strerrorname_np(errno)));
@@ -164,8 +164,9 @@ int ioctl(int fd, unsigned long cmd, ...)
 	int (*original_ioctl)(int fd, unsigned long cmd, ...);
 	original_ioctl = (int (*)(int, long unsigned int, ...)) dlsym(RTLD_NEXT, "ioctl");
 
-	/* don't trace ioctls that are not in videodev2.h or media.h */
-	if (ioctl2s(cmd).empty())
+	std::string ioctl_str = ioctl2s(cmd);
+	/* Don't trace ioctls that are not in videodev2.h or media.h */
+	if (ioctl_str.empty())
 		return (*original_ioctl)(fd, cmd, arg);
 
 	if (cmd == VIDIOC_S_EXT_CTRLS)
@@ -178,9 +179,9 @@ int ioctl(int fd, unsigned long cmd, ...)
 		streamoff_cleanup(*(static_cast<v4l2_buf_type*>(arg)));
 
 	json_object *ioctl_obj = json_object_new_object();
-	json_object_object_add(ioctl_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_IOCTL, defs_libv4l2tracer_syscall).c_str()));
+	json_object_object_add(ioctl_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_IOCTL, libv4l2tracer_syscall_val_def).c_str()));
 	json_object_object_add(ioctl_obj, "fd", json_object_new_int(fd));
-	json_object_object_add(ioctl_obj, "cmd", json_object_new_string(ioctl2s(cmd).c_str()));
+	json_object_object_add(ioctl_obj, "cmd", json_object_new_string(ioctl_str.c_str()));
 
 
 	/* Trace the ioctl arguments provided by userspace. */

@@ -28,18 +28,21 @@
 #include "v4l2-info.h"
 
 struct val_def {
-	unsigned long val;
+	long val;
 	const char *str;
 };
 
+std::string val2s_hex(long val);
 /* Use val2s when there is one, unique value expected, otherwise use flags2s. */
-std::string val2s(unsigned long val, const val_def *def);
+std::string val2s(long val, const val_def *def);
 std::string ioctl2s(unsigned long cmd);
+std::string which2s(unsigned long which);
+
 
 #include "v4l2-tracer-info-gen.h"
 
 enum LIBV4L2TRACER_SYSCALL {
-	LIBV4L2TRACER_SYSCALL_IOCTL = 1,
+	LIBV4L2TRACER_SYSCALL_IOCTL,
 	LIBV4L2TRACER_SYSCALL_OPEN,
 	LIBV4L2TRACER_SYSCALL_OPEN64,
 	LIBV4L2TRACER_SYSCALL_CLOSE,
@@ -48,7 +51,7 @@ enum LIBV4L2TRACER_SYSCALL {
 	LIBV4L2TRACER_SYSCALL_MUNMAP,
 };
 
-constexpr val_def defs_libv4l2tracer_syscall[] = {
+constexpr val_def libv4l2tracer_syscall_val_def[] = {
 	{ LIBV4L2TRACER_SYSCALL_IOCTL,	"ioctl" },
 	{ LIBV4L2TRACER_SYSCALL_OPEN,	"open" },
 	{ LIBV4L2TRACER_SYSCALL_OPEN64,	"open64" },
@@ -56,7 +59,29 @@ constexpr val_def defs_libv4l2tracer_syscall[] = {
 	{ LIBV4L2TRACER_SYSCALL_MMAP,	"mmap" },
 	{ LIBV4L2TRACER_SYSCALL_MMAP64,	"mmap64" },
 	{ LIBV4L2TRACER_SYSCALL_MUNMAP,	"munmap" },
-	{ 0, "" }
+	{ -1, "" }
+};
+
+constexpr val_def which_val_def[] = {
+	{ V4L2_CTRL_WHICH_CUR_VAL,	"V4L2_CTRL_WHICH_CUR_VAL" },
+	{ V4L2_CTRL_WHICH_DEF_VAL,	"V4L2_CTRL_WHICH_DEF_VAL" },
+	{ V4L2_CTRL_WHICH_REQUEST_VAL,	"V4L2_CTRL_WHICH_REQUEST_VAL" },
+	{ -1, "" }
+};
+
+/* Use with V4L2_BUF_FLAG_TIMESTAMP_MASK */
+constexpr val_def v4l2_buf_timestamp_val_def[] = {
+	{ V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC, "V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC" },
+	{ V4L2_BUF_FLAG_TIMESTAMP_COPY, "V4L2_BUF_FLAG_TIMESTAMP_COPY" },
+	{ V4L2_BUF_FLAG_TIMESTAMP_UNKNOWN, "V4L2_BUF_FLAG_TIMESTAMP_UNKNOWN" },
+	{ -1, "" }
+};
+
+/* Use with V4L2_BUF_FLAG_TSTAMP_SRC_MASK */
+constexpr val_def v4l2_buf_tstamp_val_def[] = {
+	{ V4L2_BUF_FLAG_TSTAMP_SRC_SOE, "V4L2_BUF_FLAG_TSTAMP_SRC_SOE" },
+	{ V4L2_BUF_FLAG_TSTAMP_SRC_EOF, "V4L2_BUF_FLAG_TSTAMP_SRC_EOF" },
+	{ -1, "" }
 };
 
 #endif

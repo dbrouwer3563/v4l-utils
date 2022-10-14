@@ -7,7 +7,8 @@
 #define RETRACE_HELPER_H
 
 unsigned s2flags(std::string s, const flag_def *def);
-long s2val(std::string s, const val_def *def, bool ioctl = false);
+long s2val_hex(std::string s);
+long s2val(std::string s, const val_def *def);
 
 long s2ioctl(std::string s);    
 

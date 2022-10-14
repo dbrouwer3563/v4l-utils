@@ -46,10 +46,10 @@ sub flag_gen {
 		($flag_func_name) = ($_) =~ /#define (\w+_)FLAG_.+/;
 		$flag_func_name = lc $flag_func_name;
 	}
+
 	printf $fh_common_info_h "constexpr flag_def %sflag_def[] = {\n", $flag_func_name;
 
 	($flag) = ($_) =~ /#define\s+(\w+)\s+.+/;
-
 	#get the first flag
 	printf $fh_common_info_h "\t{ $flag, \"$flag\" },\n";
 
@@ -58,10 +58,24 @@ sub flag_gen {
 		next if $_ =~ /^\s*$/; #skip blank lines between flags if any
 		last if ((grep {!/^#define\s+\w+_FL/} $_) && (grep {!/^#define V4L2_VP8_LF/} $_));
 		($flag) = ($_) =~ /#define\s+(\w+)\s+.+/;
-
+		next if ($flag_func_name eq v4l2_buf_) && ($flag =~ /.*TIMESTAMP.*/ || $flag =~ /.*TSTAMP.*/);
 		printf $fh_common_info_h "\t{ $flag, \"$flag\" },\n";
 	}
-	printf $fh_common_info_h "\t{ 0, nullptr }\n};\n\n";
+	printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
+}
+
+sub enum_gen {
+	($enum_name) = ($_) =~ /enum (\w+) {/;
+	printf $fh_common_info_h "constexpr val_def %s_val_def[] = {\n", $enum_name;
+	while (<>) {
+		last if $_ =~ /};/;
+		($name) = ($_) =~ /\s+(\w+)\s+.*/;
+		next if ($name ne uc $name); # skip comments that don't start with *
+		next if ($_ =~ /^\s*\/?\s?\*.*/); # skip comments
+		next if $name =~ /^\s*$/;  # skip blank lines
+		printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $name, $name;
+	}
+	printf $fh_common_info_h "\t{ -1, \"\" }\n};\n\n";
 }
 
 sub struct_gen {
@@ -260,6 +274,10 @@ while (<>) {
 		}
 	}
 
+	if (grep {/^enum/} $_) {
+		enum_gen();
+	}
+
 	if (grep {/^\/\* Control classes \*\//} $_) {
 		printf $fh_common_info_h "constexpr val_def ctrlclass_val_def[] = {\n";
 
@@ -268,32 +286,10 @@ while (<>) {
 			($ctrl_class) = ($_) =~ /#define\s*(\w+)\s+.*/;
 			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $ctrl_class, $ctrl_class;
 		}
-		printf $fh_common_info_h "\t{ 0, nullptr }\n};\n\n";
-	}
-
-	if (grep {/^enum v4l2_buf_type/} $_) {
-		printf $fh_common_info_h "constexpr val_def buf_type_val_def[] = {\n";
-		while (<>) {
-			last if $_ =~ /\/?\s?\*.*/; # Stop at /* Deprecated, do not use */
-			($buf_type) = ($_) =~ /\s*(\w+)\s+.*/;
-			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $buf_type, $buf_type;
-		}
-		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
-	}
-
-	if (grep {/^enum v4l2_memory/} $_) {
-		printf $fh_common_info_h "constexpr val_def defs_memory_type[] = {\n";
-
-		while (<>) {
-			last if $_ =~ /};/;
-			($memory_type) = ($_) =~ /\s*(\w+)\s+.*/;
-			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $memory_type, $memory_type;
-		}
-		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
+		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n\n";
 	}
 
 	if (grep {/\/\* Values for 'capabilities' field \*\//} $_) {
-
 		printf $fh_common_info_h "constexpr flag_def capabilities_flag_def[] = {\n";
 		while (<>) {
 			last if $_ =~ /.*V I D E O   I M A G E   F O R M A T.*/;
@@ -302,11 +298,11 @@ while (<>) {
 			($cap) = ($_) =~ /#define\s+(\w+)\s+.+/;
 			printf $fh_common_info_h "\t{ $cap, \"$cap\" },\n"
 		}
-		printf $fh_common_info_h "\t{ 0, nullptr }\n};\n\n";
+		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
 	}
 
 	if (grep {/\*      Pixel format         FOURCC                          depth  Description  \*\//} $_) {
-		printf $fh_common_info_h "constexpr val_def defs_pixfmt[] = {\n";
+		printf $fh_common_info_h "constexpr val_def v4l2_pix_fmt_val_def[] = {\n";
 		while (<>) {
 			last if $_ =~ /.*SDR formats - used only for Software Defined Radio devices.*/;
 			next if ($_ =~ /^\s*\/\*.*/); #skip comments
@@ -314,25 +310,11 @@ while (<>) {
 			($pixfmt) = ($_) =~ /#define (\w+)\s+.*/;
 			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $pixfmt, $pixfmt;
 		}
-		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
-	}
-
-	if (grep {/^enum v4l2_ctrl_type/} $_) {
-		printf $fh_common_info_h "constexpr val_def ctrl_type_val_def[] = {\n";
-
-		while (<>) {
-			next if ($_ =~ /^\s?\/?\s?\*.*/); #skip comments
-			next if $_ =~ /^\s*$/; #skip blank lines
-			last if $_ =~ /};/;
-			($ctrl_type) = ($_) =~ /\s*(\w+)\s+.*/;
-
-			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $ctrl_type, $ctrl_type;
-		}
-		printf $fh_common_info_h "\t{ 0, nullptr }\n};\n\n";
+		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n\n";
 	}
 
 	if (grep {/.*I O C T L   C O D E S   F O R   V I D E O   D E V I C E S.*/} $_) {
-		printf $fh_common_info_h "constexpr val_def defs_ioctl_video[] = {\n";
+		printf $fh_common_info_h "constexpr val_def ioctl_video_val_def[] = {\n";
 
 		while (<>) {
 			next if ($_ =~ /^\/?\s?\*.*/); #skip comments
@@ -342,12 +324,12 @@ while (<>) {
 			($ioctl_name) = ($_) =~ /^#define\s*(\w+)\s*/;
 			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $ioctl_name, $ioctl_name;
 		}
-		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
+		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n\n";
 	}
 
 	# from media.h
 	if (grep {/\/\* ioctls \*\//} $_) {
-		printf $fh_common_info_h "constexpr val_def defs_ioctl_media[] = {\n";
+		printf $fh_common_info_h "constexpr val_def ioctl_media_val_def[] = {\n";
 
 		while (<>) {
 			next if ($_ =~ /^\/?\s?\*.*/); #skip comments
@@ -355,9 +337,9 @@ while (<>) {
 			next if $_ =~ /^\s+/; #skip lines that start with a space, comments
 			last if $_ =~ /^#define MEDIA_ENT_TYPE_SHIFT/;
 			($ioctl_name) = ($_) =~ /^#define\s*(\w+)\s*/;
-			printf $fh_common_info_h "\t\t{ %s,\t\"%s\" },\n", $ioctl_name, $ioctl_name;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $ioctl_name, $ioctl_name;
 		}
-		printf $fh_common_info_h "\t{ 0, \"\" }\n};\n";
+		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n";
 	}
 }
 

@@ -51,27 +51,6 @@ std::string ver2s(unsigned int version)
 	return buf;
 }
 
-std::string which2s(unsigned long which)
-{
-	std::string s = "unknown";
-
-	switch (which) {
-	case V4L2_CTRL_WHICH_CUR_VAL:
-		s = "V4L2_CTRL_WHICH_CUR_VAL";
-		break;
-	case V4L2_CTRL_WHICH_DEF_VAL:
-		s= "V4L2_CTRL_WHICH_DEF_VAL";
-		break;
-	case V4L2_CTRL_WHICH_REQUEST_VAL:
-		s = "V4L2_CTRL_WHICH_REQUEST_VAL";
-		break;
-	default:
-		break;
-	}
-
-	return s;
-}
-
 struct trace_options options;
 
 struct trace_context ctx_trace = {

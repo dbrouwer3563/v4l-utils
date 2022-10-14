@@ -7,7 +7,6 @@
 #define TRACE_HELPER_H
 
 std::string ver2s(unsigned int version);
-std::string which2s(unsigned long which);
 
 bool options_are_set(void);
 void set_options(void);

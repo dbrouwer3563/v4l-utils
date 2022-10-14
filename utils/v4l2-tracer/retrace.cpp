@@ -46,7 +46,7 @@ void retrace_mmap(json_object *mmap_obj, bool is_mmap64)
 
 	json_object *flags_obj;
 	json_object_object_get_ex(mmap_args_obj, "flags", &flags_obj);
-	int flags = json_object_get_int(flags_obj);
+	int flags = s2val_hex(json_object_get_string(flags_obj));
 
 	json_object *fildes_obj;
 	json_object_object_get_ex(mmap_args_obj, "fildes", &fildes_obj);
@@ -139,7 +139,7 @@ void retrace_open(json_object *jobj, bool is_open64)
 
 	json_object *oflag_obj;
 	json_object_object_get_ex(open_args_obj, "oflag", &oflag_obj);
-	int oflag = json_object_get_int(oflag_obj);
+	int oflag = s2val_hex(json_object_get_string(oflag_obj));
 
 	json_object *mode_obj;
 	json_object_object_get_ex(open_args_obj, "mode", &mode_obj);
@@ -207,19 +207,17 @@ struct v4l2_requestbuffers retrace_v4l2_requestbuffers(json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(requestbuffers_obj, "type", &type_obj);
-	request_buffers.type = s2val(json_object_get_string(type_obj), buf_type_val_def);
+	request_buffers.type = s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	json_object *memory_obj;
 	json_object_object_get_ex(requestbuffers_obj, "memory", &memory_obj);
-	request_buffers.memory = s2val(json_object_get_string(memory_obj), defs_memory_type);
+	request_buffers.memory = s2val(json_object_get_string(memory_obj), v4l2_memory_val_def);
 
-	json_object *capabilities_obj;
-	json_object_object_get_ex(requestbuffers_obj, "capabilities", &capabilities_obj);
-	request_buffers.capabilities = json_object_get_int(capabilities_obj);
+	/* Capabilities are set by the driver so don't bother retracing. */
 
 	json_object *flags_obj;
 	json_object_object_get_ex(requestbuffers_obj, "flags", &flags_obj);
-	request_buffers.flags = json_object_get_int(flags_obj);
+	request_buffers.flags = s2flags(json_object_get_string(flags_obj), v4l2_memory_flag_def);
 
 	return request_buffers;
 }
@@ -233,7 +231,7 @@ void retrace_vidioc_reqbufs(int fd_retrace, json_object *ioctl_args)
 	if (verbose || (errno != 0)) {
 		perror("VIDIOC_REQBUFS");
 		fprintf(stderr, "type: %s, request_buffers.count: %d\n",
-		        buftype2s(request_buffers.type).c_str(), request_buffers.count);     //fix
+		        buftype2s(request_buffers.type).c_str(), request_buffers.count);
 		print_context();
 	}
 }
@@ -278,7 +276,7 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(buf_obj, "type", &type_obj);
-	buf->type = s2val(json_object_get_string(type_obj), buf_type_val_def);
+	buf->type = s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	json_object *bytesused_obj;
 	json_object_object_get_ex(buf_obj, "bytesused", &bytesused_obj);
@@ -286,11 +284,13 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 
 	json_object *flags_obj;
 	json_object_object_get_ex(buf_obj, "flags", &flags_obj);
-	buf->flags = (__u32) json_object_get_uint64(flags_obj);
+	std::string flags_str = json_object_get_string(flags_obj);
+	/* Don't bother retracing the timestamp flags since they come from the driver. */
+	buf->flags = (__u32) s2flags(flags_str, v4l2_buf_flag_def);
 
 	json_object *field_obj;
 	json_object_object_get_ex(buf_obj, "field", &field_obj);
-	buf->field = (__u32) json_object_get_uint64(field_obj);
+	buf->field = (__u32) s2val(json_object_get_string(field_obj), v4l2_field_val_def);
 
 	json_object *timestamp_obj;
 	json_object_object_get_ex(buf_obj, "timestamp", &timestamp_obj);
@@ -310,7 +310,7 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 
 	json_object *memory_obj;
 	json_object_object_get_ex(buf_obj, "memory", &memory_obj);
-	buf->memory = s2val(json_object_get_string(memory_obj), defs_memory_type);
+	buf->memory = s2val(json_object_get_string(memory_obj), v4l2_memory_val_def);
 
 	json_object *length_obj;
 	json_object_object_get_ex(buf_obj, "length", &length_obj);
@@ -429,7 +429,7 @@ struct v4l2_exportbuffer retrace_v4l2_exportbuffer(json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(exportbuffer_obj, "type", &type_obj);
-	export_buffer.type = s2val(json_object_get_string(type_obj), buf_type_val_def);
+	export_buffer.type = s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	json_object *index_obj;
 	json_object_object_get_ex(exportbuffer_obj, "index", &index_obj);
@@ -441,7 +441,7 @@ struct v4l2_exportbuffer retrace_v4l2_exportbuffer(json_object *ioctl_args)
 
 	json_object *flags_obj;
 	json_object_object_get_ex(exportbuffer_obj, "flags", &flags_obj);
-	export_buffer.flags = json_object_get_int(flags_obj);
+	export_buffer.flags = s2val_hex(json_object_get_string(flags_obj));
 
 	json_object *fd_obj;
 	json_object_object_get_ex(exportbuffer_obj, "fd", &fd_obj);
@@ -524,7 +524,7 @@ void retrace_vidioc_streamon(int fd_retrace, json_object *ioctl_args)
 {
 	json_object *type_obj;
 	json_object_object_get_ex(ioctl_args, "type", &type_obj);
-	v4l2_buf_type buf_type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), buf_type_val_def);
+	v4l2_buf_type buf_type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	ioctl(fd_retrace, VIDIOC_STREAMON, &buf_type);
 
@@ -538,7 +538,7 @@ void retrace_vidioc_streamoff(int fd_retrace, json_object *ioctl_args)
 {
 	json_object *type_obj;
 	json_object_object_get_ex(ioctl_args, "type", &type_obj);
-	v4l2_buf_type buf_type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), buf_type_val_def);
+	v4l2_buf_type buf_type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	ioctl(fd_retrace, VIDIOC_STREAMOFF, &buf_type);
 
@@ -586,15 +586,15 @@ struct v4l2_pix_format_mplane retrace_v4l2_pix_format_mplane(json_object *v4l2_f
 
 	json_object *pixelformat_obj;
 	json_object_object_get_ex(pix_mp_obj, "pixelformat", &pixelformat_obj);
-	pix_mp.pixelformat = s2val(json_object_get_string(pixelformat_obj), defs_pixfmt);
+	pix_mp.pixelformat = s2val(json_object_get_string(pixelformat_obj), v4l2_pix_fmt_val_def);
 
 	json_object *field_obj;
 	json_object_object_get_ex(pix_mp_obj, "field", &field_obj);
-	pix_mp.field = json_object_get_int(field_obj);
+	pix_mp.field = s2val(json_object_get_string(field_obj), v4l2_field_val_def);
 
 	json_object *colorspace_obj;
 	json_object_object_get_ex(pix_mp_obj, "colorspace", &colorspace_obj);
-	pix_mp.colorspace = json_object_get_int(colorspace_obj);
+	pix_mp.colorspace = s2val(json_object_get_string(colorspace_obj), v4l2_colorspace_val_def);
 
 	json_object *num_planes_obj;
 	json_object_object_get_ex(pix_mp_obj, "num_planes", &num_planes_obj);
@@ -605,19 +605,19 @@ struct v4l2_pix_format_mplane retrace_v4l2_pix_format_mplane(json_object *v4l2_f
 
 	json_object *flags_obj;
 	json_object_object_get_ex(pix_mp_obj, "flags", &flags_obj);
-	pix_mp.flags = json_object_get_int(flags_obj);
+	pix_mp.flags = s2flags(json_object_get_string(flags_obj), v4l2_pix_fmt_flag_def);
 
 	json_object *ycbcr_enc_obj;
 	json_object_object_get_ex(pix_mp_obj, "ycbcr_enc", &ycbcr_enc_obj);
-	pix_mp.ycbcr_enc = json_object_get_int(ycbcr_enc_obj);
+	pix_mp.ycbcr_enc = s2val(json_object_get_string(ycbcr_enc_obj), v4l2_ycbcr_encoding_val_def);
 
 	json_object *quantization_obj;
 	json_object_object_get_ex(pix_mp_obj, "quantization", &quantization_obj);
-	pix_mp.quantization = json_object_get_int(quantization_obj);
+	pix_mp.quantization = s2val(json_object_get_string(quantization_obj), v4l2_quantization_val_def);
 
 	json_object *xfer_func_obj;
 	json_object_object_get_ex(pix_mp_obj, "xfer_func", &xfer_func_obj);
-	pix_mp.xfer_func = json_object_get_int(xfer_func_obj);
+	pix_mp.xfer_func = s2val(json_object_get_string(xfer_func_obj), v4l2_xfer_func_val_def);
 
 	return pix_mp;
 }
@@ -631,7 +631,7 @@ struct v4l2_format retrace_v4l2_format(json_object *ioctl_args)
 
 	json_object *type_obj;
 	json_object_object_get_ex(v4l2_format_obj, "type", &type_obj);
-	format.type = s2val(json_object_get_string(type_obj), buf_type_val_def);
+	format.type = s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	switch (format.type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
@@ -709,7 +709,7 @@ struct v4l2_ext_control retrace_v4l2_ext_control(json_object *ext_controls_obj, 
 
 	json_object *id_obj;
 	json_object_object_get_ex(ctrl_obj, "id", &id_obj);
-	ctrl.id = json_object_get_int64(id_obj);
+	ctrl.id = s2val_hex(json_object_get_string(id_obj));
 
 	json_object *size_obj;
 	json_object_object_get_ex(ctrl_obj, "size", &size_obj);
@@ -801,7 +801,7 @@ void retrace_vidioc_s_ext_ctrls(int fd_retrace, json_object *ioctl_args)
 
 	json_object *which_obj;
 	json_object_object_get_ex(ext_controls_obj, "which", &which_obj);
-	ext_controls.which = json_object_get_int(which_obj);
+	ext_controls.which = s2val(json_object_get_string(which_obj), which_val_def);
 
 	json_object *count_obj;
 	json_object_object_get_ex(ext_controls_obj, "count", &count_obj);
@@ -841,13 +841,13 @@ void retrace_query_ext_ctrl(int fd_retrace, json_object *ioctl_args)
 
 	json_object *id_obj;
 	json_object_object_get_ex(query_ext_ctrl_obj, "id", &id_obj);
-	query_ext_ctrl.id = json_object_get_int64(id_obj);
+	query_ext_ctrl.id = s2val_hex(json_object_get_string(id_obj));
 
 	ioctl(fd_retrace, VIDIOC_QUERY_EXT_CTRL, &query_ext_ctrl);
 
 	if (verbose) {
 		perror("VIDIOC_QUERY_EXT_CTRL");
-		fprintf(stderr, "id: %u\n\n", query_ext_ctrl.id);
+		fprintf(stderr, "id: %x\n\n", query_ext_ctrl.id);
 	}
 }
 
@@ -858,13 +858,14 @@ void retrace_vidioc_enum_fmt(int fd_retrace, json_object *ioctl_args)
 	json_object *v4l2_fmtdesc_obj;
 	json_object_object_get_ex(ioctl_args, "v4l2_fmtdesc", &v4l2_fmtdesc_obj);
 
+	/* Applications initialize only the type, mbus_code and index fields */
 	json_object *index_obj;
 	json_object_object_get_ex(v4l2_fmtdesc_obj, "index", &index_obj);
 	fmtdesc.index = json_object_get_int(index_obj);
 
 	json_object *type_obj;
 	json_object_object_get_ex(v4l2_fmtdesc_obj, "type", &type_obj);
-	fmtdesc.type = s2val(json_object_get_string(type_obj), buf_type_val_def);
+	fmtdesc.type = s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	json_object *mbus_code_obj;
 	json_object_object_get_ex(v4l2_fmtdesc_obj, "mbus_code", &mbus_code_obj);
@@ -872,15 +873,8 @@ void retrace_vidioc_enum_fmt(int fd_retrace, json_object *ioctl_args)
 
 	ioctl(fd_retrace, VIDIOC_ENUM_FMT, &fmtdesc);
 
-	if (verbose) {
+	if (verbose)
 		perror("VIDIOC_ENUM_FMT");
-		fprintf(stderr, "index: %u\n", fmtdesc.index);
-		fprintf(stderr, "type: %u\n", fmtdesc.type); ////fix     
-		fprintf(stderr, "flags: %u\n", fmtdesc.flags);
-		fprintf(stderr, "description: %s\n", fmtdesc.description);
-		fprintf(stderr, "pixelformat: %u\n", fmtdesc.pixelformat);
-		fprintf(stderr, "mbus_code: %u\n\n", fmtdesc.mbus_code);
-	}
 }
 
 void retrace_vidioc_querycap(int fd_retrace)
@@ -1114,7 +1108,7 @@ void retrace_mem(json_object *mem_obj)
 {
 	json_object *type_obj;
 	json_object_object_get_ex(mem_obj, "type", &type_obj);
-	v4l2_buf_type type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), buf_type_val_def);
+	v4l2_buf_type type = (v4l2_buf_type) s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	json_object *bytesused_obj;
 	json_object_object_get_ex(mem_obj, "bytesused", &bytesused_obj);
@@ -1165,7 +1159,7 @@ void retrace_object(json_object *jobj)
 
 	errno = 0;
 
-	int syscall = s2val(json_object_get_string(syscall_obj), defs_libv4l2tracer_syscall);
+	int syscall = s2val(json_object_get_string(syscall_obj), libv4l2tracer_syscall_val_def);
 
 	switch (syscall) {
 	case LIBV4L2TRACER_SYSCALL_IOCTL:
