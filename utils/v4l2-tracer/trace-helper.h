@@ -12,6 +12,7 @@ bool options_are_set(void);
 void set_options(void);
 bool option_is_set_verbose(void);
 bool option_is_set_pretty_print_mem(void);
+bool option_is_set_pretty_print_all(void);
 bool option_is_set_write_decoded_data_to_json_file(void);
 
 bool is_video_or_media_device(const char *path);

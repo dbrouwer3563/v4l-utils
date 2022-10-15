@@ -8,9 +8,6 @@
 #include <sys/wait.h>
 #include "v4l2-tracer-common.h"
 
-#define STR(x) #x
-#define STRING(x) STR(x)
-
 void print_help_retracer(void);
 int retracer(int argc, char *argv[]);
 

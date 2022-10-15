@@ -6,12 +6,6 @@
 #ifndef RETRACE_HELPER_H
 #define RETRACE_HELPER_H
 
-unsigned s2flags(std::string s, const flag_def *def);
-long s2val_hex(std::string s);
-long s2val(std::string s, const val_def *def);
-
-long s2ioctl(std::string s);    
-
 bool buffer_in_retrace_context(int fd, __u32 offset = 0);
 int get_buffer_fd_retrace(__u32 type, __u32 index);
 void add_buffer_retrace(int fd, __u32 type, __u32 index, __u32 offset = 0);

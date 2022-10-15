@@ -3,8 +3,6 @@
  * Copyright 2022 Collabora Ltd.
  */
 
-#include <sstream> //   ?
-#include <vector> ///?
 #include "v4l2-tracer-common.h"
 
 struct buffer_retrace {
@@ -30,113 +28,6 @@ struct retrace_context {
 static struct retrace_context ctx_retrace = {
 	.lock = PTHREAD_MUTEX_INITIALIZER
 };
-
-
-
-/*
- * Take a comma-separated string of flags and convert into corresponding values from def.
- * If the flags are unknown but numeric, return their hex values, otherwise return 0.
- * Reverse of flag2s.
- */
-unsigned long s2flags(std::string s, const flag_def *def)
-{
-	size_t idx;
-	unsigned long val = 0;
-
-	while (def->flag) {
-		idx = s.find(def->str);
-		if (idx != std::string::npos) {
-
-			/* Special treatment for flag values that have an offset. */
-			std::string temp = def->str;
-			if (temp == "V4L2_FWHT_FL_COMPONENTS_NUM_MSK") {
-				val += (def->flag & (2 << V4L2_FWHT_FL_COMPONENTS_NUM_OFFSET));
-			} else if (temp == "V4L2_FWHT_FL_PIXENC_MSK") {
-				val += (def->flag & (1 << V4L2_FWHT_FL_PIXENC_OFFSET));
-			} else {
-				val += def->flag;
-			}
-
-			/* erase the portion of the string that has been found including the separators */
-			s.erase(idx, strlen(def->str));
-			idx = s.find(", ");
-			if (idx != std::string::npos)
-				s.erase(idx, 2);
-		}
-		def++;
-	}
-
-	if (s.empty())
-		return val;
-
-	/* Try to convert the unrecognized flags to hex values. */
-	std::stringstream ss(s);
-	std::vector<std::string> unknown_flags;
-	std::string flag_str;
-	while (ss >> flag_str)
-		unknown_flags.push_back(flag_str);
-
-	for (unsigned long i = 0; i < unknown_flags.size(); i++) {
-
-		/* remove any separators */
-		idx = unknown_flags[i].find(",");
-		if (idx != std::string::npos) {
-			unknown_flags[i].erase(idx, 1);
-		}
-
-		try {
-			val += std::stoul(unknown_flags[i], nullptr, 0);
-		} catch (std::invalid_argument& ia) {
-		} catch (std::out_of_range& oor) {
-		}
-	}
-	return val;
-}
-
-/* If the string is empty, return 0. Otherwise, convert the string to a long and return it or -1 on error. */
-long s2val_hex(std::string s)
-{
-	if (s.empty())
-		return 0;
-
-	long val = -1;
-	try {
-		/* Base is autodetected so also works for octal/decimal. */
-		val = std::stoul(s, nullptr, 0);
-	} catch (std::invalid_argument& ia) {} catch (std::out_of_range& oor) {}
-	return val;
-}
-
-/*
- * If the string has a corresponding val in def, return the val.
- * Otherwise, if the string is empty return 0.
- * If the string is numeric, convert the string to a long
- * and return it.
- */
-long s2val(std::string s, const val_def *def)
-{
-	if (s.empty())
-		return 0;
-
-	while ((def->val != -1) && (def->str != s))
-		def++;
-
-	if (def->str == s)
-		return def->val;
-
-	return s2val_hex(s);
-}
-
-long s2ioctl(std::string s)
-{
-	long val = -1;
-
-	val = s2val(s, ioctl_video_val_def);
-	if (val == -1)
-		val = s2val(s, ioctl_media_val_def);
-
-	return val;
-}
 
 bool buffer_in_retrace_context(int fd, __u32 offset)
 {

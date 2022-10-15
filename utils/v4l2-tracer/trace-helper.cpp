@@ -82,6 +82,11 @@ bool option_is_set_pretty_print_mem(void)
 	return options.pretty_print_mem;
 }
 
+bool option_is_set_pretty_print_all(void)
+{
+	return options.pretty_print_all;
+}
+
 bool option_is_set_write_decoded_data_to_json_file(void)
 {
 	return options.write_decoded_data_to_json_file;

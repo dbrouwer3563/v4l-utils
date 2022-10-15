@@ -18,6 +18,7 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <list>
+#include <vector>
 #include <unordered_map>
 #include <algorithm> /* for std::find */
 #include <linux/dma-buf.h>
@@ -27,40 +28,28 @@
 #include "codec-fwht.h"
 #include "v4l2-info.h"
 
+#define STR(x) #x
+#define STRING(x) STR(x)
+
 struct val_def {
 	long val;
 	const char *str;
 };
 
 std::string val2s_hex(long val);
-/* Use val2s when there is one, unique value expected, otherwise use flags2s. */
+long s2val_hex(std::string s);
 std::string val2s(long val, const val_def *def);
+long s2val(std::string s, const val_def *def);
+
+unsigned long s2flags(std::string s, const flag_def *def);
+
 std::string ioctl2s(unsigned long cmd);
+long s2ioctl(std::string s);
+
 std::string which2s(unsigned long which);
 
 
 #include "v4l2-tracer-info-gen.h"
-
-enum LIBV4L2TRACER_SYSCALL {
-	LIBV4L2TRACER_SYSCALL_IOCTL,
-	LIBV4L2TRACER_SYSCALL_OPEN,
-	LIBV4L2TRACER_SYSCALL_OPEN64,
-	LIBV4L2TRACER_SYSCALL_CLOSE,
-	LIBV4L2TRACER_SYSCALL_MMAP,
-	LIBV4L2TRACER_SYSCALL_MMAP64,
-	LIBV4L2TRACER_SYSCALL_MUNMAP,
-};
-
-constexpr val_def libv4l2tracer_syscall_val_def[] = {
-	{ LIBV4L2TRACER_SYSCALL_IOCTL,	"ioctl" },
-	{ LIBV4L2TRACER_SYSCALL_OPEN,	"open" },
-	{ LIBV4L2TRACER_SYSCALL_OPEN64,	"open64" },
-	{ LIBV4L2TRACER_SYSCALL_CLOSE,	"close" },
-	{ LIBV4L2TRACER_SYSCALL_MMAP,	"mmap" },
-	{ LIBV4L2TRACER_SYSCALL_MMAP64,	"mmap64" },
-	{ LIBV4L2TRACER_SYSCALL_MUNMAP,	"munmap" },
-	{ -1, "" }
-};
 
 constexpr val_def which_val_def[] = {
 	{ V4L2_CTRL_WHICH_CUR_VAL,	"V4L2_CTRL_WHICH_CUR_VAL" },

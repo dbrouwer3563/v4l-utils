@@ -11,18 +11,18 @@ void trace_open(int fd, const char *path, int oflag, mode_t mode, bool is_open64
 {
 	json_object *open_obj = json_object_new_object();
 
-	if (is_open64)
-		json_object_object_add(open_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_OPEN64, libv4l2tracer_syscall_val_def).c_str()));
-	else
-		json_object_object_add(open_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_OPEN, libv4l2tracer_syscall_val_def).c_str()));
-
 	json_object_object_add(open_obj, "fd", json_object_new_int(fd));
 
 	json_object *open_args = json_object_new_object();
 	json_object_object_add(open_args, "path", json_object_new_string(path));
 	json_object_object_add(open_args, "oflag", json_object_new_string(val2s_hex(oflag).c_str()));
 	json_object_object_add(open_args, "mode", json_object_new_uint64(mode));
-	json_object_object_add(open_obj, "open_args", open_args);
+
+	if (is_open64)
+		json_object_object_add(open_obj, "open64", open_args);
+	else
+		json_object_object_add(open_obj, "open", open_args);
+
 
 	write_json_object_to_json_file(open_obj);
 	json_object_put(open_obj);
@@ -35,11 +35,6 @@ void trace_mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t o
 	if (errno)
 		json_object_object_add(mmap_obj, "errno", json_object_new_string(strerrorname_np(errno)));
 
-	if (is_mmap64)
-		json_object_object_add(mmap_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_MMAP64, libv4l2tracer_syscall_val_def).c_str()));
-	else
-		json_object_object_add(mmap_obj, "syscall", json_object_new_string(val2s(LIBV4L2TRACER_SYSCALL_MMAP, libv4l2tracer_syscall_val_def).c_str()));
-
 	json_object *mmap_args = json_object_new_object();
 	json_object_object_add(mmap_args, "addr", json_object_new_int64((int64_t)addr));
 	json_object_object_add(mmap_args, "len", json_object_new_uint64(len));
@@ -47,7 +42,12 @@ void trace_mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t o
 	json_object_object_add(mmap_args, "flags", json_object_new_string(val2s_hex(flags).c_str()));
 	json_object_object_add(mmap_args, "fildes", json_object_new_int(fildes));
 	json_object_object_add(mmap_args, "off", json_object_new_int64(off));
-	json_object_object_add(mmap_obj, "mmap_args", mmap_args);
+
+	if (is_mmap64)
+		json_object_object_add(mmap_obj, "mmap64", mmap_args);
+	else
+		json_object_object_add(mmap_obj, "mmap", mmap_args);
+
 
 	json_object_object_add(mmap_obj, "buffer_address", json_object_new_uint64(buf_address));
 
@@ -64,10 +64,7 @@ json_object *trace_buffer(unsigned char *buffer_pointer, __u32 bytesused)
 
 	for (__u32 i = 0; i < bytesused; i++) {
 		memset(buf, 0, sizeof(buf));
-		/*
-		 * Each byte e.g. D9 will write a string of two characters "D9".
-		 * The bytes are displayed with the most-significant bits first.
-		 */
+		/* Each byte e.g. D9 will write a string of two characters "D9". */
 		sprintf(buf, "%02x", buffer_pointer[i]);
 		s += buf;
 		byte_count_per_line++;
@@ -77,7 +74,7 @@ json_object *trace_buffer(unsigned char *buffer_pointer, __u32 bytesused)
 			byte_count_per_line = 0;
 			json_object_array_add(mem_array_obj, json_object_new_string(s.c_str()));
 			s.clear();
-		} else if (i % 2) {
+		} else if (option_is_set_pretty_print_mem() || option_is_set_pretty_print_all()) {
 			s += " ";
 		}
 	}
@@ -92,10 +89,9 @@ json_object *trace_buffer(unsigned char *buffer_pointer, __u32 bytesused)
 void trace_mem(int fd, __u32 offset, __u32 type, int index, __u32 bytesused, unsigned long start)
 {
 	json_object *mem_obj = json_object_new_object();
-	json_object_object_add(mem_obj, "mem_dump", json_object_new_string(buftype2s(type).c_str()));
+	json_object_object_add(mem_obj, "mem_dump", json_object_new_string(val2s(type, v4l2_buf_type_val_def).c_str()));
 	json_object_object_add(mem_obj, "fd", json_object_new_int(fd));
 	json_object_object_add(mem_obj, "offset", json_object_new_uint64(offset));
-	json_object_object_add(mem_obj, "type", json_object_new_string(val2s(type, v4l2_buf_type_val_def).c_str()));
 	json_object_object_add(mem_obj, "index", json_object_new_int(index));
 	json_object_object_add(mem_obj, "bytesused", json_object_new_uint64(bytesused));
 	json_object_object_add(mem_obj, "address", json_object_new_uint64(start));
@@ -214,26 +210,22 @@ void trace_v4l2_pix_format(json_object *format_obj, struct v4l2_pix_format pix)
 	json_object_object_add(pix_obj, "field", json_object_new_string(val2s(pix.field, v4l2_field_val_def).c_str()));
 	json_object_object_add(pix_obj, "bytesperline", json_object_new_uint64(pix.bytesperline));
 	json_object_object_add(pix_obj, "sizeimage", json_object_new_uint64(pix.sizeimage));
-	json_object_object_add(pix_obj, "colorspace", json_object_new_uint64(pix.colorspace));
-	json_object_object_add(pix_obj, "colorspace_str",
-	                       json_object_new_string(colorspace2s(pix.colorspace).c_str()));
+	json_object_object_add(pix_obj, "colorspace",
+	                       json_object_new_string(val2s(pix.colorspace, v4l2_colorspace_val_def).c_str()));
+
 	json_object_object_add(pix_obj, "priv", json_object_new_uint64(pix.priv));
 
 	if (pix.priv == V4L2_PIX_FMT_PRIV_MAGIC) {
 		json_object_object_add(pix_obj, "priv_str",
 		                       json_object_new_string("V4L2_PIX_FMT_PRIV_MAGIC"));
-		json_object_object_add(pix_obj, "flags", json_object_new_uint64(pix.flags));
-		json_object_object_add(pix_obj, "flags_str",
-		                       json_object_new_string(pixflags2s(pix.flags).c_str()));
-		json_object_object_add(pix_obj, "ycbcr_enc", json_object_new_uint64(pix.ycbcr_enc));
-		json_object_object_add(pix_obj, "ycbcr_enc_str",
-		                       json_object_new_string(ycbcr_enc2s(pix.ycbcr_enc).c_str()));
-		json_object_object_add(pix_obj, "quantization", json_object_new_uint64(pix.quantization));
-		json_object_object_add(pix_obj, "quantization_str",
-		                       json_object_new_string(quantization2s(pix.quantization).c_str()));
-		json_object_object_add(pix_obj, "xfer_func", json_object_new_uint64(pix.xfer_func));
-		json_object_object_add(pix_obj, "xfer_func_str",
-		                       json_object_new_string(xfer_func2s(pix.xfer_func).c_str()));
+		json_object_object_add(pix_obj, "flags",
+		                       json_object_new_string(flags2s(pix.flags, v4l2_pix_fmt_flag_def).c_str()));
+		json_object_object_add(pix_obj, "ycbcr_enc",
+		                       json_object_new_string(val2s(pix.ycbcr_enc, v4l2_ycbcr_encoding_val_def).c_str()));
+		json_object_object_add(pix_obj, "quantization",
+		                       json_object_new_string(val2s(pix.quantization, v4l2_quantization_val_def).c_str()));
+		json_object_object_add(pix_obj, "xfer_func",
+		                       json_object_new_string(val2s(pix.xfer_func, v4l2_xfer_func_val_def).c_str()));
 	}
 	json_object_object_add(format_obj, "v4l2_pix_format", pix_obj);
 }
@@ -311,13 +303,16 @@ void trace_v4l2_buffer(void *arg, json_object *ioctl_args)
 	json_object_object_add(buf_obj, "index", json_object_new_uint64(buf->index));
 	json_object_object_add(buf_obj, "type", json_object_new_string(val2s(buf->type, v4l2_buf_type_val_def).c_str()));
 	json_object_object_add(buf_obj, "bytesused", json_object_new_uint64(buf->bytesused));
+
 	std::string flags = flags2s(buf->flags & ~(V4L2_BUF_FLAG_TIMESTAMP_MASK | V4L2_BUF_FLAG_TSTAMP_SRC_MASK), v4l2_buf_flag_def);
-	if (!flags.empty() && !val2s(buf->flags & V4L2_BUF_FLAG_TIMESTAMP_MASK, v4l2_buf_timestamp_val_def).empty())
+	std::string next_flag = val2s(buf->flags & V4L2_BUF_FLAG_TIMESTAMP_MASK, v4l2_buf_timestamp_val_def);
+	if (!flags.empty() && !next_flag.empty())
 		flags += ", ";
-	flags += val2s(buf->flags & V4L2_BUF_FLAG_TIMESTAMP_MASK, v4l2_buf_timestamp_val_def);
-	if (!flags.empty() && !val2s(buf->flags & V4L2_BUF_FLAG_TSTAMP_SRC_MASK, v4l2_buf_tstamp_val_def).empty())
+	flags += next_flag;
+	next_flag = val2s(buf->flags & V4L2_BUF_FLAG_TSTAMP_SRC_MASK, v4l2_buf_tstamp_val_def);
+	if (!flags.empty() && !next_flag.empty())
 		flags += ", ";
-	flags += val2s(buf->flags & V4L2_BUF_FLAG_TSTAMP_SRC_MASK, v4l2_buf_tstamp_val_def);
+	flags += next_flag;
 
 	json_object_object_add(buf_obj, "flags", json_object_new_string(flags.c_str()));
 	json_object_object_add(buf_obj, "field", json_object_new_string(val2s(buf->field, v4l2_field_val_def).c_str()));
