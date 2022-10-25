@@ -18,6 +18,12 @@ void trace_mem_encoded(int fd, __u32 offset);
 json_object *trace_ioctl_args(int fd, unsigned long cmd, void *arg,
                               bool from_userspace = true);
 
+std::list<unsigned long> ioctls_to_trace = {
+	VIDIOC_G_FMT, VIDIOC_S_FMT, VIDIOC_REQBUFS, VIDIOC_QUERYBUF, VIDIOC_QBUF, VIDIOC_DQBUF,
+	VIDIOC_EXPBUF, VIDIOC_STREAMON, VIDIOC_STREAMOFF, VIDIOC_S_EXT_CTRLS, MEDIA_IOC_REQUEST_ALLOC,
+	MEDIA_REQUEST_IOC_QUEUE, MEDIA_REQUEST_IOC_REINIT
+};
+
 int open(const char *path, int oflag, ...)
 {
 	errno = 0;
@@ -35,8 +41,6 @@ int open(const char *path, int oflag, ...)
 	int fd = (*original_open)(path, oflag, mode);
 
 	if (is_video_or_media_device(path)) {
-		if (!options_are_set())
-			set_options();
 		add_device(fd, path);
 		trace_open(fd, path, oflag, mode, false);
 	}
@@ -60,8 +64,6 @@ int open64(const char *path, int oflag, ...)
 	int fd = (*original_open64)(path, oflag, mode);
 
 	if (is_video_or_media_device(path)) {
-		if (!options_are_set())
-			set_options();
 		add_device(fd, path);
 		trace_open(fd, path, oflag, mode, true);
 	}
@@ -162,9 +164,8 @@ int ioctl(int fd, unsigned long cmd, ...)
 	int (*original_ioctl)(int fd, unsigned long cmd, ...);
 	original_ioctl = (int (*)(int, long unsigned int, ...)) dlsym(RTLD_NEXT, "ioctl");
 
-	std::string ioctl_str = ioctl2s(cmd);
-	/* Don't trace ioctls that are not in videodev2.h or media.h */
-	if (ioctl_str.empty())
+	/* Don't trace ioctls that are not in the specified ioctls_to_trace list. */
+	if (find(ioctls_to_trace.begin(), ioctls_to_trace.end(), cmd) == ioctls_to_trace.end())
 		return (*original_ioctl)(fd, cmd, arg);
 
 	if (cmd == VIDIOC_S_EXT_CTRLS)
@@ -178,7 +179,7 @@ int ioctl(int fd, unsigned long cmd, ...)
 
 	json_object *ioctl_obj = json_object_new_object();
 	json_object_object_add(ioctl_obj, "fd", json_object_new_int(fd));
-	json_object_object_add(ioctl_obj, "ioctl", json_object_new_string(ioctl_str.c_str()));
+	json_object_object_add(ioctl_obj, "ioctl", json_object_new_string(ioctl2s(cmd).c_str()));
 
 
 	/* Trace the ioctl arguments provided by userspace. */

@@ -8,18 +8,14 @@
 
 std::string ver2s(unsigned int version);
 
-bool options_are_set(void);
-void set_options(void);
-bool option_is_set_verbose(void);
-bool option_is_set_pretty_print_mem(void);
-bool option_is_set_pretty_print_all(void);
-bool option_is_set_write_decoded_data_to_json_file(void);
-
 bool is_video_or_media_device(const char *path);
 void add_device(int fd, std::string path);
 std::string get_device(int fd);
 int remove_device(int fd);
 int count_devices(void);
+
+void set_media_device(std::string media_device);
+std::string get_media_device(void);
 
 bool buffer_in_trace_context(int fd, __u32 offset = 0);
 __u32 get_buffer_type_trace(int fd, __u32 offset = 0);

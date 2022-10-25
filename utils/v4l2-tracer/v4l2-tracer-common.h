@@ -6,11 +6,13 @@
 #ifndef V4L2_TRACER_COMMON_H
 #define V4L2_TRACER_COMMON_H
 
+
 #include <poll.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
+#include <dirent.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <pthread.h>
@@ -27,6 +29,8 @@
 #include <json.h>
 #include "codec-fwht.h"
 #include "v4l2-info.h"
+#include "media-info.h"
+#include "config.h"
 
 #define STR(x) #x
 #define STRING(x) STR(x)
@@ -36,18 +40,35 @@ struct val_def {
 	const char *str;
 };
 
-std::string val2s_hex(long val);
-long s2val_hex(std::string s);
+bool is_verbose(void);
+bool is_debug(void);
+
+void print_v4l2_tracer_info(void);
+void print_usage(void);
+
+std::string number2s_oct(long num);
+std::string number2s(long num);
 std::string val2s(long val, const val_def *def);
-long s2val(std::string s, const val_def *def);
-
-unsigned long s2flags(std::string s, const flag_def *def);
-
 std::string ioctl2s(unsigned long cmd);
+std::string fl2s(unsigned val, const flag_def *def);
+std::string fl2s_buffer(__u32 flags);
+std::string fl2s_fwht(__u32 flags);
+
+long s2number(std::string s);
+long s2val(std::string s, const val_def *def);
 long s2ioctl(std::string s);
+unsigned long s2flags(std::string s, const flag_def *def);
+unsigned long s2flags_buffer(std::string s);
+unsigned long s2flags_fwht(std::string s);
 
 std::string which2s(unsigned long which);
 
+std::string get_path_media_from_path_video(std::string path_video_arg);
+std::string get_path_video_from_fd_media(int fd);
+std::list<std::string> get_entities_linked_to_path_video(int media_fd, std::string path_video);
+
+void set_retrace_paths(std::string path_media, std::string path_video);
+std::pair<std::string, std::string> get_retrace_paths(void);
 
 #include "v4l2-tracer-info-gen.h"
 
@@ -58,18 +79,10 @@ constexpr val_def which_val_def[] = {
 	{ -1, "" }
 };
 
-/* Use with V4L2_BUF_FLAG_TIMESTAMP_MASK */
-constexpr val_def v4l2_buf_timestamp_val_def[] = {
-	{ V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC, "V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC" },
-	{ V4L2_BUF_FLAG_TIMESTAMP_COPY, "V4L2_BUF_FLAG_TIMESTAMP_COPY" },
-	{ V4L2_BUF_FLAG_TIMESTAMP_UNKNOWN, "V4L2_BUF_FLAG_TIMESTAMP_UNKNOWN" },
-	{ -1, "" }
-};
-
-/* Use with V4L2_BUF_FLAG_TSTAMP_SRC_MASK */
-constexpr val_def v4l2_buf_tstamp_val_def[] = {
-	{ V4L2_BUF_FLAG_TSTAMP_SRC_SOE, "V4L2_BUF_FLAG_TSTAMP_SRC_SOE" },
-	{ V4L2_BUF_FLAG_TSTAMP_SRC_EOF, "V4L2_BUF_FLAG_TSTAMP_SRC_EOF" },
+constexpr val_def open_val_def[] = {
+	{ O_RDONLY,	"O_RDONLY" },
+	{ O_WRONLY,	"O_WRONLY" },
+	{ O_RDWR,	"O_RDWR" },
 	{ -1, "" }
 };
 

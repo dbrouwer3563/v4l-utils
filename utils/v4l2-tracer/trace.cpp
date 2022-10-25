@@ -9,20 +9,52 @@
 
 void trace_open(int fd, const char *path, int oflag, mode_t mode, bool is_open64)
 {
+	int media_fd = -1;
+	std::string path_media;
+	std::string path_video;
+	std::string path_str = path;
+
+	if (path_str.find("video") != path_str.npos) {
+		path_media = get_path_media_from_path_video(path_str);
+		media_fd = open(path_media.c_str(), O_RDONLY);
+	} else if (path_str.find("media") != path_str.npos) {
+		path_video = get_path_video_from_fd_media(fd);
+		media_fd = fd;
+	}
+
+	struct media_device_info info = {};
+	ioctl(media_fd, MEDIA_IOC_DEVICE_INFO, &info);
+
 	json_object *open_obj = json_object_new_object();
-
 	json_object_object_add(open_obj, "fd", json_object_new_int(fd));
-
 	json_object *open_args = json_object_new_object();
+
+	json_object_object_add(open_args, "driver", json_object_new_string(info.driver));
+	json_object_object_add(open_args, "bus_info", json_object_new_string(info.bus_info));
+
 	json_object_object_add(open_args, "path", json_object_new_string(path));
-	json_object_object_add(open_args, "oflag", json_object_new_string(val2s_hex(oflag).c_str()));
-	json_object_object_add(open_args, "mode", json_object_new_uint64(mode));
+	if (path_str.find("video") != path_str.npos) {
+		json_object_object_add(open_args, "path_media", json_object_new_string(path_media.c_str()));
+	} else if (path_str.find("media") != path_str.npos) {
+		json_object_object_add(open_args, "path_video", json_object_new_string(path_video.c_str()));
+	}
+	std::list<std::string> linked_entities = get_entities_linked_to_path_video(media_fd, path_video);
+	json_object *linked_entities_obj = json_object_new_array();
+	for (auto &e : linked_entities)
+		json_object_array_add(linked_entities_obj, json_object_new_string(e.c_str()));
+	json_object_object_add(open_args, "linked_entities", linked_entities_obj);
+
+	/* Don't close the media_fd if this is a call to open it. */
+	if ((path_str.find("video") != path_str.npos) && (media_fd != -1))
+		close(media_fd);
+
+	json_object_object_add(open_args, "oflag", json_object_new_string(val2s(oflag, open_val_def).c_str()));
+	json_object_object_add(open_args, "mode", json_object_new_string(number2s_oct(mode).c_str()));
 
 	if (is_open64)
 		json_object_object_add(open_obj, "open64", open_args);
 	else
 		json_object_object_add(open_obj, "open", open_args);
-
 
 	write_json_object_to_json_file(open_obj);
 	json_object_put(open_obj);
@@ -39,7 +71,7 @@ void trace_mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t o
 	json_object_object_add(mmap_args, "addr", json_object_new_int64((int64_t)addr));
 	json_object_object_add(mmap_args, "len", json_object_new_uint64(len));
 	json_object_object_add(mmap_args, "prot", json_object_new_int(prot));
-	json_object_object_add(mmap_args, "flags", json_object_new_string(val2s_hex(flags).c_str()));
+	json_object_object_add(mmap_args, "flags", json_object_new_string(number2s(flags).c_str()));
 	json_object_object_add(mmap_args, "fildes", json_object_new_int(fildes));
 	json_object_object_add(mmap_args, "off", json_object_new_int64(off));
 
@@ -69,12 +101,12 @@ json_object *trace_buffer(unsigned char *buffer_pointer, __u32 bytesused)
 		s += buf;
 		byte_count_per_line++;
 
-		/*  Add a space every two bytes e.g. "012A 4001" and a newline every 16 bytes. */
-		if (byte_count_per_line == 16) {
+		/*  Add a space every two bytes e.g. "012A 4001" and a newline every 32 bytes. */
+		if (byte_count_per_line == 32) {
 			byte_count_per_line = 0;
 			json_object_array_add(mem_array_obj, json_object_new_string(s.c_str()));
 			s.clear();
-		} else if (option_is_set_pretty_print_mem() || option_is_set_pretty_print_all()) {
+		} else if (getenv("V4L2_TRACER_OPTION_PRETTY_PRINT_MEM") || getenv("V4L2_TRACER_OPTION_PRETTY_PRINT_ALL")) {
 			s += " ";
 		}
 	}
@@ -97,12 +129,12 @@ void trace_mem(int fd, __u32 offset, __u32 type, int index, __u32 bytesused, uns
 	json_object_object_add(mem_obj, "address", json_object_new_uint64(start));
 
 	if ((type == V4L2_BUF_TYPE_VIDEO_OUTPUT || type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) ||
-	    (option_is_set_write_decoded_data_to_json_file())) {
+	    (getenv("V4L2_TRACER_OPTION_WRITE_DECODED_TO_JSON_FILE"))) {
 		json_object *mem_array_obj = trace_buffer((unsigned char*) start, bytesused);
 		json_object_object_add(mem_obj, "mem_array", mem_array_obj);
 	}
 
-	if (option_is_set_pretty_print_mem())
+	if (getenv("V4L2_TRACER_OPTION_PRETTY_PRINT_MEM"))
 		write_json_object_to_json_file(mem_obj, JSON_C_TO_STRING_PRETTY);
 	else
 		write_json_object_to_json_file(mem_obj);
@@ -119,9 +151,6 @@ void trace_mem_encoded(int fd, __u32 offset)
 
 	if (!start)
 		return;
-
-	if (option_is_set_verbose())
-		fprintf(stderr, "%s\n", __func__);
 
 	bytesused = get_buffer_bytesused_trace(fd, offset);
 	type = get_buffer_type_trace(fd, offset);
@@ -140,8 +169,8 @@ void trace_vidioc_querycap(void *arg, json_object *ioctl_args)
 	                       json_object_new_string((const char *)cap->bus_info));
 	json_object_object_add(cap_obj, "version",
 	                       json_object_new_string(ver2s(cap->version).c_str()));
-	json_object_object_add(cap_obj, "capabilities", json_object_new_string(flags2s(cap->capabilities, capabilities_flag_def).c_str()));
-	json_object_object_add(cap_obj, "device_caps", json_object_new_string(flags2s(cap->device_caps, capabilities_flag_def).c_str()));
+	json_object_object_add(cap_obj, "capabilities", json_object_new_string(fl2s(cap->capabilities, capabilities_flag_def).c_str()));
+	json_object_object_add(cap_obj, "device_caps", json_object_new_string(fl2s(cap->device_caps, capabilities_flag_def).c_str()));
 	json_object_object_add(ioctl_args, "v4l2_capability", cap_obj);
 }
 
@@ -152,8 +181,10 @@ void trace_vidioc_enum_fmt(void *arg, json_object *ioctl_args)
 
 	json_object_object_add(fmtdesc_obj, "index", json_object_new_uint64(fmtdesc->index));
 	json_object_object_add(fmtdesc_obj, "type", json_object_new_string(val2s(fmtdesc->type, v4l2_buf_type_val_def).c_str()));
-	json_object_object_add(fmtdesc_obj, "flags", json_object_new_string(flags2s(fmtdesc->flags, v4l2_fmt_flag_def).c_str()));
-	json_object_object_add(fmtdesc_obj, "pixelformat", json_object_new_string(val2s(fmtdesc->pixelformat, v4l2_pix_fmt_val_def).c_str()));
+	if (fmtdesc->flags)
+		json_object_object_add(fmtdesc_obj, "flags", json_object_new_string(fl2s(fmtdesc->flags, v4l2_fmt_flag_def).c_str()));
+	if (fmtdesc->pixelformat)
+		json_object_object_add(fmtdesc_obj, "pixelformat", json_object_new_string(val2s(fmtdesc->pixelformat, v4l2_pix_fmt_val_def).c_str()));
 	json_object_object_add(fmtdesc_obj, "mbus_code", json_object_new_uint64(fmtdesc->mbus_code));
 	json_object_object_add(ioctl_args, "v4l2_fmtdesc", fmtdesc_obj);
 }
@@ -180,7 +211,10 @@ void trace_v4l2_pix_format_mplane(json_object *format_obj, struct v4l2_pix_forma
 
 	json_object_object_add(pix_mp_obj, "width", json_object_new_uint64(pix_mp.width));
 	json_object_object_add(pix_mp_obj, "height", json_object_new_uint64(pix_mp.height));
-	json_object_object_add(pix_mp_obj, "pixelformat", json_object_new_string(val2s(pix_mp.pixelformat, v4l2_pix_fmt_val_def).c_str()));
+
+	json_object_object_add(pix_mp_obj, "pixelformat",
+	                       json_object_new_string(val2s(pix_mp.pixelformat, v4l2_pix_fmt_val_def).c_str()));
+
 	json_object_object_add(pix_mp_obj, "field", json_object_new_string(val2s(pix_mp.field, v4l2_field_val_def).c_str()));
 	json_object_object_add(pix_mp_obj, "colorspace",
 	                       json_object_new_string(val2s(pix_mp.colorspace, v4l2_colorspace_val_def).c_str()));
@@ -188,8 +222,7 @@ void trace_v4l2_pix_format_mplane(json_object *format_obj, struct v4l2_pix_forma
 	for (int i = 0; i < pix_mp.num_planes; i++)
 		trace_v4l2_plane_pix_format(pix_mp_obj, pix_mp.plane_fmt[i], i);
 
-	json_object_object_add(pix_mp_obj, "flags",
-	                       json_object_new_string(flags2s(pix_mp.flags, v4l2_pix_fmt_flag_def).c_str()));
+	json_object_object_add(pix_mp_obj, "flags", json_object_new_string(fl2s(pix_mp.flags, v4l2_pix_fmt_flag_def).c_str()));
 	json_object_object_add(pix_mp_obj, "ycbcr_enc",
 	                       json_object_new_string(val2s(pix_mp.ycbcr_enc, v4l2_ycbcr_encoding_val_def).c_str()));
 	json_object_object_add(pix_mp_obj, "quantization",
@@ -213,13 +246,11 @@ void trace_v4l2_pix_format(json_object *format_obj, struct v4l2_pix_format pix)
 	json_object_object_add(pix_obj, "colorspace",
 	                       json_object_new_string(val2s(pix.colorspace, v4l2_colorspace_val_def).c_str()));
 
-	json_object_object_add(pix_obj, "priv", json_object_new_uint64(pix.priv));
-
 	if (pix.priv == V4L2_PIX_FMT_PRIV_MAGIC) {
-		json_object_object_add(pix_obj, "priv_str",
+		json_object_object_add(pix_obj, "priv",
 		                       json_object_new_string("V4L2_PIX_FMT_PRIV_MAGIC"));
 		json_object_object_add(pix_obj, "flags",
-		                       json_object_new_string(flags2s(pix.flags, v4l2_pix_fmt_flag_def).c_str()));
+		                       json_object_new_string(fl2s(pix.flags, v4l2_pix_fmt_flag_def).c_str()));
 		json_object_object_add(pix_obj, "ycbcr_enc",
 		                       json_object_new_string(val2s(pix.ycbcr_enc, v4l2_ycbcr_encoding_val_def).c_str()));
 		json_object_object_add(pix_obj, "quantization",
@@ -274,7 +305,7 @@ void trace_v4l2_requestbuffers(void *arg, json_object *ioctl_args)
 	                       json_object_new_string(val2s(request_buffers->memory, v4l2_memory_val_def).c_str()));
 	json_object_object_add(request_buffers_obj, "capabilities",
 	                       json_object_new_string(bufcap2s(request_buffers->capabilities).c_str()));
-	json_object_object_add(request_buffers_obj, "flags", json_object_new_string(flags2s(request_buffers->flags, v4l2_memory_flag_def).c_str()));
+	json_object_object_add(request_buffers_obj, "flags", json_object_new_string(fl2s(request_buffers->flags, v4l2_memory_flag_def).c_str()));
 	json_object_object_add(ioctl_args, "v4l2_requestbuffers", request_buffers_obj);
 }
 
@@ -304,17 +335,7 @@ void trace_v4l2_buffer(void *arg, json_object *ioctl_args)
 	json_object_object_add(buf_obj, "type", json_object_new_string(val2s(buf->type, v4l2_buf_type_val_def).c_str()));
 	json_object_object_add(buf_obj, "bytesused", json_object_new_uint64(buf->bytesused));
 
-	std::string flags = flags2s(buf->flags & ~(V4L2_BUF_FLAG_TIMESTAMP_MASK | V4L2_BUF_FLAG_TSTAMP_SRC_MASK), v4l2_buf_flag_def);
-	std::string next_flag = val2s(buf->flags & V4L2_BUF_FLAG_TIMESTAMP_MASK, v4l2_buf_timestamp_val_def);
-	if (!flags.empty() && !next_flag.empty())
-		flags += ", ";
-	flags += next_flag;
-	next_flag = val2s(buf->flags & V4L2_BUF_FLAG_TSTAMP_SRC_MASK, v4l2_buf_tstamp_val_def);
-	if (!flags.empty() && !next_flag.empty())
-		flags += ", ";
-	flags += next_flag;
-
-	json_object_object_add(buf_obj, "flags", json_object_new_string(flags.c_str()));
+	json_object_object_add(buf_obj, "flags", json_object_new_string(fl2s_buffer(buf->flags).c_str()));
 	json_object_object_add(buf_obj, "field", json_object_new_string(val2s(buf->field, v4l2_field_val_def).c_str()));
 
 	json_object *timestamp_obj = json_object_new_object();
@@ -370,7 +391,7 @@ void trace_v4l2_exportbuffer(void *arg, json_object *ioctl_args)
 	json_object_object_add(exportbuffer_obj, "type", json_object_new_string(val2s(export_buffer->type, v4l2_buf_type_val_def).c_str()));
 	json_object_object_add(exportbuffer_obj, "index", json_object_new_uint64(export_buffer->index));
 	json_object_object_add(exportbuffer_obj, "plane", json_object_new_uint64(export_buffer->plane));
-	json_object_object_add(exportbuffer_obj, "flags", json_object_new_string(val2s_hex(export_buffer->flags).c_str()));
+	json_object_object_add(exportbuffer_obj, "flags", json_object_new_string(number2s(export_buffer->flags).c_str()));
 	json_object_object_add(exportbuffer_obj, "fd", json_object_new_int(export_buffer->fd));
 
 	json_object_object_add(ioctl_args, "v4l2_exportbuffer", exportbuffer_obj);
@@ -387,9 +408,7 @@ void trace_v4l2_ext_control(json_object *ext_controls_obj, struct v4l2_ext_contr
 	std::string unique_key_for_control;
 
 	json_object *ctrl_obj = json_object_new_object();
-	json_object_object_add(ctrl_obj, "id", json_object_new_string(val2s_hex(ctrl.id).c_str()));
-	json_object_object_add(ctrl_obj, "control_class",
-	                       json_object_new_string(val2s(ctrl.id & 0xFFFF0000, ctrlclass_val_def).c_str()));
+	json_object_object_add(ctrl_obj, "id", json_object_new_string(val2s(ctrl.id, stateless_controls_val_def).c_str()));
 	json_object_object_add(ctrl_obj, "size", json_object_new_uint64(ctrl.size));
 
 	switch (ctrl.id) {
@@ -503,7 +522,7 @@ void trace_vidioc_query_ext_ctrl(void *arg, json_object *ioctl_args)
 	json_object *query_ext_ctrl_obj = json_object_new_object();
 	struct v4l2_query_ext_ctrl *queryextctrl = static_cast<struct v4l2_query_ext_ctrl*>(arg);
 
-	json_object_object_add(query_ext_ctrl_obj, "id", json_object_new_string(val2s_hex(queryextctrl->id).c_str()));
+	json_object_object_add(query_ext_ctrl_obj, "id", json_object_new_string(number2s(queryextctrl->id).c_str()));
 	json_object_object_add(query_ext_ctrl_obj, "control_class",
 	                       json_object_new_string(val2s(queryextctrl->id & 0xFFFF0000, ctrlclass_val_def).c_str()));
 	json_object_object_add(query_ext_ctrl_obj, "type",
@@ -517,7 +536,7 @@ void trace_vidioc_query_ext_ctrl(void *arg, json_object *ioctl_args)
 	json_object_object_add(query_ext_ctrl_obj, "default_value",
 	                       json_object_new_int64(queryextctrl->default_value));
 	json_object_object_add(query_ext_ctrl_obj, "flags",
-	                       json_object_new_string(flags2s(queryextctrl->flags, v4l2_ctrl_flag_def).c_str()));
+	                       json_object_new_string(fl2s(queryextctrl->flags, v4l2_ctrl_flag_def).c_str()));
 	json_object_object_add(query_ext_ctrl_obj, "elem_size",
 	                       json_object_new_uint64(queryextctrl->elem_size));
 	json_object_object_add(query_ext_ctrl_obj, "elems",

@@ -15,9 +15,6 @@ struct buffer_retrace {
 };
 
 struct retrace_context {
-	__u32 width;
-	__u32 height;
-	__u32 pixelformat;
 	pthread_mutex_t lock;
 	/* Key is a file descriptor from the trace, value is the corresponding fd in the retrace. */
 	std::unordered_map<int, int> retrace_fds;
@@ -28,6 +25,73 @@ struct retrace_context {
 static struct retrace_context ctx_retrace = {
 	.lock = PTHREAD_MUTEX_INITIALIZER
 };
+
+std::pair<std::string, std::string> retrace_paths;
+
+void set_retrace_paths(std::string path_media, std::string path_video)
+{
+	retrace_paths = std::make_pair(path_media, path_video);
+}
+
+std::pair<std::string, std::string> get_retrace_paths()
+{
+	return retrace_paths;
+}
+
+std::pair<std::string, std::string> search_for_retrace_paths(std::string driver, std::list<std::string> linked_entities_in_json_file)
+{
+	std::pair<std::string, std::string> retrace_paths;
+
+	DIR *dp = opendir("/dev");
+	if (dp == nullptr)
+		return retrace_paths;
+
+	struct dirent *ep;
+
+	while ((ep = readdir(dp))) {
+
+		const char *name = ep->d_name;
+		if (memcmp(name, "media", 5) || !isdigit(name[5]))
+			continue;
+
+		std::string media_entity_name;
+		std::string media_devname = std::string("/dev/") + name;
+		int media_fd = open(media_devname.c_str(), O_RDONLY);
+		if (media_fd < 0)
+			continue;
+
+		struct media_device_info info;
+		if (ioctl(media_fd, MEDIA_IOC_DEVICE_INFO, &info) || info.driver != driver) {
+			close(media_fd);
+			continue;
+		}
+
+		std::string path_video = get_path_video_from_fd_media(media_fd);
+		if (path_video.empty()) {
+			close(media_fd);
+			continue;
+		}
+
+		std::list<std::string> linked_entities  = get_entities_linked_to_path_video(media_fd, path_video);
+		if (linked_entities.size() == 0) {
+			close(media_fd);
+			continue;
+		}
+
+		//just find one match that's enough
+		for (auto &e : linked_entities_in_json_file) {
+			if (find(linked_entities.begin(), linked_entities.end(), e) != linked_entities.end()) {
+				retrace_paths = std::make_pair(media_devname, path_video);
+				break;
+			}
+		}
+		close(media_fd);
+		if (!retrace_paths.first.empty())
+			break;
+	}
+	closedir(dp);
+	return retrace_paths;
+}
 
 bool buffer_in_retrace_context(int fd, __u32 offset)
 {
@@ -133,7 +197,7 @@ void add_fd(int fd_trace, int fd_retrace)
 
 int get_fd_retrace_from_fd_trace(int fd_trace)
 {
-	int fd_retrace = 0;  //can be -1?   
+	int fd_retrace = -1;
 	std::unordered_map<int, int>::const_iterator it;
 
 	pthread_mutex_lock(&ctx_retrace.lock);
@@ -160,32 +224,6 @@ void print_fds(void)
 	for (auto it = ctx_retrace.retrace_fds.cbegin(); it != ctx_retrace.retrace_fds.cend(); ++it)
 		fprintf(stderr, "fd_trace: %d, fd_retrace: %d\n", it->first, it->second);
 	pthread_mutex_unlock(&ctx_retrace.lock);
-}
-
-void set_pixelformat_retrace(__u32 width, __u32 height, __u32 pixelformat)
-{
-	pthread_mutex_lock(&ctx_retrace.lock);
-	ctx_retrace.width = width;
-	ctx_retrace.height = height;
-	ctx_retrace.pixelformat = pixelformat;
-	pthread_mutex_unlock(&ctx_retrace.lock);
-}
-
-unsigned get_expected_length_retrace(void)
-{
-	pthread_mutex_lock(&ctx_retrace.lock);
-	unsigned width = ctx_retrace.width;
-	unsigned height = ctx_retrace.height;
-	unsigned pixelformat = ctx_retrace.pixelformat;
-	pthread_mutex_unlock(&ctx_retrace.lock);
-
-	unsigned expected_length = width * height;
-	if (pixelformat == V4L2_PIX_FMT_NV12 || pixelformat == V4L2_PIX_FMT_YUV420) {
-		expected_length *= 3;
-		expected_length /= 2;
-		expected_length += (expected_length % 2);
-	}
-	return expected_length;
 }
 
 void print_context(void)

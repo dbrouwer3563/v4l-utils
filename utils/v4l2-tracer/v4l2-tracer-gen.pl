@@ -43,22 +43,27 @@ sub flag_gen {
 	} elsif ($flag_type =~ /vp8_loop_filter/) {
 		$flag_func_name = v4l2_vp8_loop_filter_;
 	} else {
-		($flag_func_name) = ($_) =~ /#define (\w+_)FLAG_.+/;
+		($flag_func_name) = ($_) =~ /#define (\w+_)FL.+/;
 		$flag_func_name = lc $flag_func_name;
 	}
 
 	printf $fh_common_info_h "constexpr flag_def %sflag_def[] = {\n", $flag_func_name;
 
 	($flag) = ($_) =~ /#define\s+(\w+)\s+.+/;
-	#get the first flag
-	printf $fh_common_info_h "\t{ $flag, \"$flag\" },\n";
+	printf $fh_common_info_h "\t{ $flag, \"$flag\" },\n"; #get the first flag
 
 	while (<>) {
 		next if ($_ =~ /^\/?\s?\*.*/); #skip comments between flags if any
 		next if $_ =~ /^\s*$/; #skip blank lines between flags if any
 		last if ((grep {!/^#define\s+\w+_FL/} $_) && (grep {!/^#define V4L2_VP8_LF/} $_));
-		($flag) = ($_) =~ /#define\s+(\w+)\s+.+/;
+		($flag) = ($_) =~ /#\s*define\s+(\w+)\s+.+/;
+
+		# don't include flags that are masks
 		next if ($flag_func_name eq v4l2_buf_) && ($flag =~ /.*TIMESTAMP.*/ || $flag =~ /.*TSTAMP.*/);
+		next if ($flag_func_name eq v4l2_ctrl_fwht_params_) && ($flag =~ /.*COMPONENTS.*/ || $flag =~ /.*PIXENC.*/);
+		next if ($flag =~ /.*MEDIA_LNK_FL_LINK_TYPE.*/);
+		next if ($flag =~ /.*MEDIA_ENT_ID_FLAG_NEXT.*/);
+
 		printf $fh_common_info_h "\t{ $flag, \"$flag\" },\n";
 	}
 	printf $fh_common_info_h "\t{ 0, \"\" }\n};\n\n";
@@ -208,15 +213,19 @@ sub struct_gen {
 		} else {
 			# members that are integers
 
-			if ($member =~ /^flags/) {
-				printf $fh_trace_cpp "\tjson_object_object_add(%s_obj, \"flags\", json_object_new_string(flags2s(p->flags, %sflag_def).c_str()));\n", $struct_name, $flag_func_name;
+			if (($struct_name eq "v4l2_ctrl_fwht_params") && ($member =~ /^flags/)) {
+				printf $fh_trace_cpp "\tjson_object_object_add(%s_obj, \"flags\", json_object_new_string(fl2s_fwht(p->flags).c_str()));\n", $struct_name;
+			} elsif ($member =~ /^flags/) {
+				printf $fh_trace_cpp "\tjson_object_object_add(%s_obj, \"flags\", json_object_new_string(fl2s(p->flags, %sflag_def).c_str()));\n", $struct_name, $flag_func_name;
 			} else {
 				printf $fh_trace_cpp "\tjson_object_object_add(%s_obj, \"%s\", json_object_new_%s(p->%s));\n", $struct_name, $member, $json_type, $member;
 			}
 
 			printf $fh_retrace_cpp "\n\tjson_object *%s_obj;\n", $member;
 			printf $fh_retrace_cpp "\tjson_object_object_get_ex(%s_obj, \"%s\", &%s_obj);\n", $struct_name, $member, $member;
-			if ($member =~ /^flags/) {
+			if (($struct_name eq "v4l2_ctrl_fwht_params") && ($member =~ /^flags/)) {
+				printf $fh_retrace_cpp "\tp->%s = ($type) s2flags_fwht(json_object_get_string(%s_obj));\n", $member, $member, $flag_func_name;
+			} elsif ($member =~ /^flags/) {
 				printf $fh_retrace_cpp "\tp->%s = ($type) s2flags(json_object_get_string(%s_obj), %sflag_def);\n", $member, $member, $flag_func_name;
 			} else {
 				printf $fh_retrace_cpp "\tp->%s = ($type) json_object_get_%s(%s_obj);\n", $member, $json_type, $member;
@@ -255,16 +264,19 @@ printf $fh_common_info_h "\#define V4L2_TRACER_INFO_GEN_H\n\n";
 printf $fh_common_info_h "#include \"v4l2-tracer-common.h\"\n\n";
 
 $in_v4l2_controls = true;
+@stateless_controls;
 
 while (<>) {
 	if (grep {/#define __LINUX_VIDEODEV2_H/} $_) {$in_v4l2_controls = false;}
 
-	if (grep {/^#define.+_FLAG_.+/} $_) {
-		flag_gen();
-	} elsif (grep {/^#define.+FWHT_FL_.+/} $_) {
+	if (grep {/^#define.+FWHT_FL_.+/} $_) {
 		flag_gen("fwht");
 	} elsif (grep {/^#define V4L2_VP8_LF.*/} $_) {
 		flag_gen("vp8_loop_filter");
+	} elsif (grep {/^#define.+_FL_.+/} $_) {  #use to get media flags
+		flag_gen();
+	} elsif (grep {/^#define.+_FLAG_.+/} $_) {
+		flag_gen();
 	}
 
 	# only generate struct functions for v4l2-controls.h
@@ -276,6 +288,10 @@ while (<>) {
 
 	if (grep {/^enum/} $_) {
 		enum_gen();
+	}
+
+	if (grep {/.*\(V4L2_CID_CODEC_STATELESS_BASE.*/} $_) {
+		push (@stateless_controls, $_);
 	}
 
 	if (grep {/^\/\* Control classes \*\//} $_) {
@@ -342,6 +358,13 @@ while (<>) {
 		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n";
 	}
 }
+
+printf $fh_common_info_h "constexpr val_def stateless_controls_val_def[] = {\n";
+foreach (@stateless_controls) {
+	($control) = ($_) =~ /^#define\s*(\w+)\s*/;
+	printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $control, $control;
+}
+printf $fh_common_info_h "\t{ -1, \"\" }\n};\n";
 
 printf $fh_trace_h "\n#endif\n";
 close $fh_trace_h;

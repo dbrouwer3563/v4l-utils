@@ -7,29 +7,30 @@
 #include "retrace-helper.h"
 #include "retrace-ctrls-gen.h"
 
-bool verbose = false;
-std::string retrace_filename;
-std::string dev_path_video;
-std::string dev_path_media;
+void compare_program_versions(json_object *v4l2_tracer_info_obj)
+{
+	json_object *package_version_obj;
+	json_object_object_get_ex(v4l2_tracer_info_obj, "package_version", &package_version_obj);
+	std::string package_version_trace = json_object_get_string(package_version_obj);
+	std::string package_version_retrace = PACKAGE_VERSION;
+	if (package_version_trace != package_version_retrace) {
+		fprintf(stderr, "Retrace warning: package version in trace file \'%s\' does not match this version:\n",
+		        package_version_trace.c_str());
+		print_v4l2_tracer_info();
+		return;
+	}
 
-enum Option_Retracer {
-    OptSetDevice_Retracer = 'd',
-    OptSetMediaDevice_Retracer = 'm',
-    OptVerbose_Retracer = 'v',
-};
-
-static struct option long_options_retracer[] = {
-    { "device", required_argument, nullptr, OptSetDevice_Retracer },
-    { "media", required_argument, nullptr, OptSetMediaDevice_Retracer },
-    { "verbose", no_argument, nullptr, OptVerbose_Retracer },
-    { nullptr, 0, nullptr, 0 }
-};
-
-char short_options_retracer[] = {
-    OptSetDevice_Retracer, ':',
-    OptSetMediaDevice_Retracer, ':',
-    OptVerbose_Retracer
-};
+	json_object *git_sha_obj;
+	json_object_object_get_ex(v4l2_tracer_info_obj, "git_sha", &git_sha_obj);
+	std::string git_sha_trace = json_object_get_string(git_sha_obj);
+	std::string git_sha_retrace = (STRING(GIT_SHA));
+	if (git_sha_trace != git_sha_retrace) {
+		fprintf(stderr, "Retrace warning: sha in trace file \'%s\' does not match this sha:\n",
+		        git_sha_trace.c_str());
+		print_v4l2_tracer_info();
+		return;
+	}
+}
 
 void retrace_mmap(json_object *mmap_obj, bool is_mmap64)
 {
@@ -49,7 +50,7 @@ void retrace_mmap(json_object *mmap_obj, bool is_mmap64)
 
 	json_object *flags_obj;
 	json_object_object_get_ex(mmap_args_obj, "flags", &flags_obj);
-	int flags = s2val_hex(json_object_get_string(flags_obj));
+	int flags = s2number(json_object_get_string(flags_obj));
 
 	json_object *fildes_obj;
 	json_object_object_get_ex(mmap_args_obj, "fildes", &fildes_obj);
@@ -60,6 +61,10 @@ void retrace_mmap(json_object *mmap_obj, bool is_mmap64)
 	off_t off = (off_t) json_object_get_int64(off_obj);
 
 	int fd_retrace = get_fd_retrace_from_fd_trace(fd_trace);
+	if (fd_retrace < 0) {
+		fprintf(stderr, "Retrace error: %s: bad file descriptor\n", __func__);
+		return;
+	}
 
 	/* Only retrace mmap calls that map a buffer. */
 	if (!buffer_in_retrace_context(fd_retrace, off))
@@ -76,7 +81,8 @@ void retrace_mmap(json_object *mmap_obj, bool is_mmap64)
 			perror("mmap64");
 		else
 			perror("mmap");
-		print_context();
+		if (is_debug())
+			print_context();
 		exit(EXIT_FAILURE);
 	}
 
@@ -90,13 +96,14 @@ void retrace_mmap(json_object *mmap_obj, bool is_mmap64)
 	set_buffer_address_retrace(fd_retrace, off, buf_address_trace,
 	                           (long) buf_address_retrace_pointer);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "fd: %d, offset: %ld, ", fd_retrace, off);
 		if (is_mmap64)
 			perror("mmap64");
 		else
 			perror("mmap");
-		fprintf(stderr, "fd: %d, offset: %ld\n", fd_retrace, off);
-		print_context();
+		if (is_debug())
+			print_context();
 	}
 }
 
@@ -120,10 +127,9 @@ void retrace_munmap(json_object *syscall_obj)
 
 	munmap((void *)buffer_address_retrace, length);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "unmapped: %ld, ", buffer_address_retrace);
 		perror("munmap");
-		fprintf(stderr, "unmapped: %ld\n", buffer_address_retrace);
-		fprintf(stderr, "\n");
 	}
 }
 
@@ -143,20 +149,52 @@ void retrace_open(json_object *jobj, bool is_open64)
 	json_object_object_get_ex(open_args_obj, "path", &path_obj);
 	std::string path = json_object_get_string(path_obj);
 
+	std::pair<std::string, std::string> retrace_paths;
+
+	if (!getenv("V4L2_TRACER_OPTION_SET_DEVICE")) {
+		std::string driver;
+		json_object *driver_obj;
+		if (json_object_object_get_ex(open_args_obj, "driver", &driver_obj))
+			driver = json_object_get_string(driver_obj);
+
+		json_object *linked_entities_obj;
+		json_object_object_get_ex(open_args_obj, "linked_entities", &linked_entities_obj);
+		std::list<std::string> linked_entities_in_json_file;
+		for (size_t i = 0; i < array_list_length(json_object_get_array(linked_entities_obj)); i++) {
+			std::string entity_name = json_object_get_string(json_object_array_get_idx(linked_entities_obj, i));
+			linked_entities_in_json_file.push_back(entity_name);
+		}
+		retrace_paths = search_for_retrace_paths(driver, linked_entities_in_json_file);
+		if (!retrace_paths.first.empty()) {
+			set_retrace_paths(retrace_paths.first, retrace_paths.second);
+			if (is_verbose())
+				fprintf(stderr, "Retracing on: %s, %s, %s\n",
+				        driver.c_str(), retrace_paths.first.c_str(), retrace_paths.second.c_str());
+		}
+	}
+	retrace_paths = get_retrace_paths();
+
+	/*
+	 * Don't try to open media devices that can't be found.
+	 * This won't be fatal to the retracing if the trace file has multiple open calls.
+	 */
+	if (retrace_paths.first.empty())
+		return;
+
+	if (path.find("media") != path.npos) {
+		path = retrace_paths.first;
+	} else if (path.find("video") != path.npos) {
+		path = retrace_paths.second;
+	}
+
 	json_object *oflag_obj;
 	json_object_object_get_ex(open_args_obj, "oflag", &oflag_obj);
-	int oflag = s2val_hex(json_object_get_string(oflag_obj));
+	int oflag = s2val(json_object_get_string(oflag_obj), open_val_def);
 
+	int mode = 0;
 	json_object *mode_obj;
-	json_object_object_get_ex(open_args_obj, "mode", &mode_obj);
-	int mode = json_object_get_int(mode_obj);
-
-	/* Use device from the command line, instead of from the trace file. */
-	if ((path.find("video") != path.npos) && !dev_path_video.empty())
-		path = dev_path_video;
-
-	if ((path.find("media") != path.npos) && !dev_path_media.empty())
-		path = dev_path_media;
+	if (json_object_object_get_ex(open_args_obj, "mode", &mode_obj))
+		mode = s2number(json_object_get_string(mode_obj));
 
 	int fd_retrace = 0;
 	if (is_open64)
@@ -171,13 +209,14 @@ void retrace_open(json_object *jobj, bool is_open64)
 
 	add_fd(fd_trace, fd_retrace);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || errno != 0) {
+		fprintf(stderr, "path: %s ", path.c_str());
 		if (is_open64)
 			perror("open64");
 		else
 			perror("open");
-		fprintf(stderr, "path: %s \n", path.c_str());
-		print_context();
+		if (is_debug())
+			print_context();
 	}
 }
 
@@ -188,15 +227,17 @@ void retrace_close(json_object *jobj)
 	int fd_retrace = get_fd_retrace_from_fd_trace(json_object_get_int(fd_trace_obj));
 
 	/* Only close devices that were opened in the retrace context. */
-	if (fd_retrace) {
-		close(fd_retrace);
-		remove_fd(json_object_get_int(fd_trace_obj));
+	if (fd_retrace < 0)
+		return;
 
-		if (verbose || (errno != 0)) {
-			perror("close");
-			fprintf(stderr, "fd: %d\n\n", fd_retrace);
+	close(fd_retrace);
+	remove_fd(json_object_get_int(fd_trace_obj));
+
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "fd: %d ", fd_retrace);
+		perror("close");
+		if (is_debug())
 			print_context();
-		}
 	}
 }
 
@@ -232,11 +273,11 @@ void retrace_vidioc_reqbufs(int fd_retrace, json_object *ioctl_args)
 
 	ioctl(fd_retrace, VIDIOC_REQBUFS, &request_buffers);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "%s, count: %d, ", buftype2s(request_buffers.type).c_str(), request_buffers.count);
 		perror("VIDIOC_REQBUFS");
-		fprintf(stderr, "type: %s, request_buffers.count: %d\n",
-		        buftype2s(request_buffers.type).c_str(), request_buffers.count);
-		print_context();
+		if (is_debug())
+			print_context();
 	}
 }
 
@@ -289,7 +330,7 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 	json_object *flags_obj;
 	json_object_object_get_ex(buf_obj, "flags", &flags_obj);
 	std::string flags_str = json_object_get_string(flags_obj);
-	buf->flags = (__u32) s2flags(flags_str, v4l2_buf_flag_def);
+	buf->flags = (__u32) s2flags_buffer(flags_str);
 
 	json_object *field_obj;
 	json_object_object_get_ex(buf_obj, "field", &field_obj);
@@ -353,6 +394,8 @@ struct v4l2_buffer *retrace_v4l2_buffer(json_object *ioctl_args)
 		json_object *request_fd_obj;
 		json_object_object_get_ex(buf_obj, "request_fd", &request_fd_obj);
 		buf->request_fd = (__s32) get_fd_retrace_from_fd_trace(json_object_get_int(request_fd_obj));
+		if (buf->request_fd < 0)
+			fprintf(stderr, "Retrace error: %s: bad file descriptor\n", __func__);
 	}
 
 	return buf;
@@ -390,11 +433,11 @@ void retrace_vidioc_querybuf(int fd_retrace, json_object *ioctl_args_user)
 		}
 	}
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "%s, index: %d, fd: %d, ", buftype2s(buf->type).c_str(), buf->index, fd_retrace);
 		perror("VIDIOC_QUERYBUF");
-		fprintf(stderr, "buf->type: %s, buf->index: %d, fd_retrace: %d\n",
-		        buftype2s(buf->type).c_str(), buf->index, fd_retrace);
-		print_context();
+		if (is_debug())
+			print_context();
 	}
 
 	free(buf);
@@ -413,11 +456,11 @@ void retrace_vidioc_qbuf(int fd_retrace, json_object *ioctl_args_user)
 		}
 	}
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "%s, index: %d, fd: %d, ", buftype2s(buf->type).c_str(), buf->index, fd_retrace);
 		perror("VIDIOC_QBUF");
-		fprintf(stderr, "buf->type: %s, buf->index: %d, fd_retrace: %d, \n",
-		        buftype2s(buf->type).c_str(), buf->index, fd_retrace);
-		print_context();
+		if (is_debug())
+			print_context();
 	}
 
 	free(buf);
@@ -444,7 +487,7 @@ struct v4l2_exportbuffer retrace_v4l2_exportbuffer(json_object *ioctl_args)
 
 	json_object *flags_obj;
 	json_object_object_get_ex(exportbuffer_obj, "flags", &flags_obj);
-	export_buffer.flags = s2val_hex(json_object_get_string(flags_obj));
+	export_buffer.flags = s2number(json_object_get_string(flags_obj));
 
 	json_object *fd_obj;
 	json_object_object_get_ex(exportbuffer_obj, "fd", &fd_obj);
@@ -480,11 +523,11 @@ void retrace_vidioc_expbuf(int fd_retrace, json_object *ioctl_args_user, json_ob
 	int buf_fd_trace = export_buffer.fd;
 	add_fd(buf_fd_trace, buf_fd_retrace);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "%s, index: %d, fd: %d", buftype2s(export_buffer.type).c_str(), export_buffer.index, buf_fd_retrace);
 		perror("VIDIOC_EXPBUF");
-		fprintf(stderr, "type: %s \n", buftype2s(export_buffer.type).c_str()); /// fix         
-		fprintf(stderr, "index: %d, fd: %d\n", export_buffer.index, buf_fd_retrace);
-		print_context();
+		if (is_debug())
+			print_context();
 	}
 }
 
@@ -502,16 +545,11 @@ void retrace_vidioc_dqbuf(int fd_retrace, json_object *ioctl_args_user)
 
 	ioctl(fd_retrace, VIDIOC_DQBUF, buf);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "%s, index: %d, fd: %d, ", buftype2s(buf->type).c_str(), buf->index, fd_retrace);
 		perror("VIDIOC_DQBUF");
-		fprintf(stderr, "fd_retrace: %d\n", fd_retrace);
-		fprintf(stderr, "buf->index: %d\n", buf->index);
-		fprintf(stderr, "buf->type: %s,\n", buftype2s(buf->type).c_str());
-		fprintf(stderr, "buf->bytesused: %u, \n", buf->bytesused);
-		fprintf(stderr, "buf->flags: %u\n", buf->flags);
-		fprintf(stderr, "buf->field: %u, buf->request_fd: %d\n", buf->field, buf->request_fd);
-		fprintf(stderr, "buf->request_fd: %d\n", buf->request_fd);
-		print_context();
+		if (is_debug())
+			print_context();
 	}
 
 	if (buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE || buf->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
@@ -531,9 +569,9 @@ void retrace_vidioc_streamon(int fd_retrace, json_object *ioctl_args)
 
 	ioctl(fd_retrace, VIDIOC_STREAMON, &buf_type);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "%s, ", buftype2s(buf_type).c_str());
 		perror("VIDIOC_STREAMON");
-		fprintf(stderr, "buftype: %s\n\n", buftype2s(buf_type).c_str()); ////fix   
 	}
 }
 
@@ -545,10 +583,9 @@ void retrace_vidioc_streamoff(int fd_retrace, json_object *ioctl_args)
 
 	ioctl(fd_retrace, VIDIOC_STREAMOFF, &buf_type);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "%s, ", buftype2s(buf_type).c_str());
 		perror("VIDIOC_STREAMOFF");
-		fprintf(stderr, "buftype: %s\n", buftype2s(buf_type).c_str()); ///////fix 
-		fprintf(stderr, "\n");
 	}
 }
 
@@ -609,11 +646,12 @@ struct v4l2_pix_format retrace_v4l2_pix_format(json_object *v4l2_format_obj)
 
 	json_object *priv_obj;
 	json_object_object_get_ex(pix_obj, "priv", &priv_obj);
-	pix.priv = json_object_get_uint64(priv_obj);
+	std::string priv = json_object_get_string(priv_obj);
 
-	if (pix.priv != V4L2_PIX_FMT_PRIV_MAGIC)
+	if (priv != "V4L2_PIX_FMT_PRIV_MAGIC") {
 		return pix;
-
+	}
+	pix.priv = V4L2_PIX_FMT_PRIV_MAGIC;
 	json_object *flags_obj;
 	json_object_object_get_ex(pix_obj, "flags", &flags_obj);
 	pix.flags = s2flags(json_object_get_string(flags_obj), v4l2_pix_fmt_flag_def);
@@ -649,8 +687,8 @@ struct v4l2_pix_format_mplane retrace_v4l2_pix_format_mplane(json_object *v4l2_f
 	pix_mp.height = json_object_get_int(height_obj);
 
 	json_object *pixelformat_obj;
-	json_object_object_get_ex(pix_mp_obj, "pixelformat", &pixelformat_obj);
-	pix_mp.pixelformat = s2val(json_object_get_string(pixelformat_obj), v4l2_pix_fmt_val_def);
+	if (json_object_object_get_ex(pix_mp_obj, "pixelformat", &pixelformat_obj))
+		pix_mp.pixelformat = s2val(json_object_get_string(pixelformat_obj), v4l2_pix_fmt_val_def);
 
 	json_object *field_obj;
 	json_object_object_get_ex(pix_mp_obj, "field", &field_obj);
@@ -668,8 +706,8 @@ struct v4l2_pix_format_mplane retrace_v4l2_pix_format_mplane(json_object *v4l2_f
 		pix_mp.plane_fmt[i] = get_v4l2_plane_pix_format(pix_mp_obj, i);
 
 	json_object *flags_obj;
-	json_object_object_get_ex(pix_mp_obj, "flags", &flags_obj);
-	pix_mp.flags = s2flags(json_object_get_string(flags_obj), v4l2_pix_fmt_flag_def);
+	if (json_object_object_get_ex(pix_mp_obj, "flags", &flags_obj))
+		pix_mp.flags = s2flags(json_object_get_string(flags_obj), v4l2_pix_fmt_flag_def);
 
 	json_object *ycbcr_enc_obj;
 	json_object_object_get_ex(pix_mp_obj, "ycbcr_enc", &ycbcr_enc_obj);
@@ -729,14 +767,7 @@ void retrace_vidioc_g_fmt(int fd_retrace, json_object *ioctl_args_user)
 
 	ioctl(fd_retrace, VIDIOC_G_FMT, &format);
 
-	if (format.type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		set_pixelformat_retrace(format.fmt.pix.width, format.fmt.pix.height,
-		                        format.fmt.pix.pixelformat);
-	if (format.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
-		set_pixelformat_retrace(format.fmt.pix_mp.width, format.fmt.pix_mp.height,
-		                        format.fmt.pix_mp.pixelformat);
-
-	if (verbose || (errno != 0))
+	if (is_verbose() || (errno != 0))
 		perror("VIDIOC_G_FMT");
 }
 
@@ -746,11 +777,9 @@ void retrace_vidioc_s_fmt(int fd_retrace, json_object *ioctl_args_user)
 
 	ioctl(fd_retrace, VIDIOC_S_FMT, &format);
 
-	if (verbose || (errno != 0)) {
+	if (is_verbose() || (errno != 0)) {
+		fprintf(stderr, "%s, %s, ", buftype2s(format.type).c_str(), fcc2s(format.fmt.pix_mp.pixelformat).c_str());
 		perror("VIDIOC_S_FMT");
-		fprintf(stderr, "%s\n", buftype2s(format.type).c_str());
-		fprintf(stderr, "format.fmt.pix_mp.pixelformat: %s\n\n",
-		        fcc2s(format.fmt.pix_mp.pixelformat).c_str());
 	}
 }
 
@@ -773,7 +802,7 @@ struct v4l2_ext_control retrace_v4l2_ext_control(json_object *ext_controls_obj, 
 
 	json_object *id_obj;
 	json_object_object_get_ex(ctrl_obj, "id", &id_obj);
-	ctrl.id = s2val_hex(json_object_get_string(id_obj));
+	ctrl.id = s2val(json_object_get_string(id_obj), stateless_controls_val_def);
 
 	json_object *size_obj;
 	json_object_object_get_ex(ctrl_obj, "size", &size_obj);
@@ -877,13 +906,17 @@ void retrace_vidioc_s_ext_ctrls(int fd_retrace, json_object *ioctl_args)
 		json_object_object_get_ex(ext_controls_obj, "request_fd", &request_fd_obj);
 		int request_fd_trace = json_object_get_int(request_fd_obj);
 		ext_controls.request_fd = get_fd_retrace_from_fd_trace(request_fd_trace);
+		if (ext_controls.request_fd < 0) {
+			fprintf(stderr, "Retrace error: %s: bad file descriptor\n", __func__);
+			return;
+		}
 	}
 
 	ext_controls.controls = retrace_v4l2_ext_control_array_pointer(ext_controls_obj, ext_controls.count);
 
 	ioctl(fd_retrace, VIDIOC_S_EXT_CTRLS, &ext_controls);
 
-	if (verbose || (errno != 0))
+	if (is_verbose() || (errno != 0))
 		perror("VIDIOC_S_EXT_CTRLS");
 
 	/* Free controls working backwards from the end of the controls array. */
@@ -905,7 +938,7 @@ void retrace_query_ext_ctrl(int fd_retrace, json_object *ioctl_args)
 
 	json_object *id_obj;
 	json_object_object_get_ex(query_ext_ctrl_obj, "id", &id_obj);
-	query_ext_ctrl.id = s2val_hex(json_object_get_string(id_obj));
+	query_ext_ctrl.id = s2number(json_object_get_string(id_obj));
 
 	json_object *type_obj;
 	json_object_object_get_ex(query_ext_ctrl_obj, "type", &type_obj);
@@ -949,9 +982,9 @@ void retrace_query_ext_ctrl(int fd_retrace, json_object *ioctl_args)
 
 	ioctl(fd_retrace, VIDIOC_QUERY_EXT_CTRL, &query_ext_ctrl);
 
-	if (verbose) {
-		perror("VIDIOC_QUERY_EXT_CTRL");
+	if (is_verbose()) {
 		fprintf(stderr, "id: %x\n\n", query_ext_ctrl.id);
+		perror("VIDIOC_QUERY_EXT_CTRL");
 	}
 }
 
@@ -971,12 +1004,12 @@ void retrace_vidioc_enum_fmt(int fd_retrace, json_object *ioctl_args)
 	fmtdesc.type = s2val(json_object_get_string(type_obj), v4l2_buf_type_val_def);
 
 	json_object *flags_obj;
-	json_object_object_get_ex(v4l2_fmtdesc_obj, "flags", &flags_obj);
-	fmtdesc.flags = s2flags(json_object_get_string(flags_obj), v4l2_fmt_flag_def);
+	if (json_object_object_get_ex(v4l2_fmtdesc_obj, "flags", &flags_obj))
+		fmtdesc.flags = s2flags(json_object_get_string(flags_obj), v4l2_fmt_flag_def);
 
 	json_object *pixelformat_obj;
-	json_object_object_get_ex(v4l2_fmtdesc_obj, "pixelformat", &pixelformat_obj);
-	fmtdesc.pixelformat = s2val(json_object_get_string(pixelformat_obj), v4l2_pix_fmt_val_def);
+	if (json_object_object_get_ex(v4l2_fmtdesc_obj, "pixelformat", &pixelformat_obj))
+		fmtdesc.pixelformat = s2val(json_object_get_string(pixelformat_obj), v4l2_pix_fmt_val_def);
 
 	json_object *mbus_code_obj;
 	json_object_object_get_ex(v4l2_fmtdesc_obj, "mbus_code", &mbus_code_obj);
@@ -984,7 +1017,7 @@ void retrace_vidioc_enum_fmt(int fd_retrace, json_object *ioctl_args)
 
 	ioctl(fd_retrace, VIDIOC_ENUM_FMT, &fmtdesc);
 
-	if (verbose)
+	if (is_verbose())
 		perror("VIDIOC_ENUM_FMT");
 }
 
@@ -994,7 +1027,7 @@ void retrace_vidioc_querycap(int fd_retrace)
 
 	ioctl(fd_retrace, VIDIOC_QUERYCAP, &argp);
 
-	if (verbose || (errno != 0))
+	if (is_verbose() || (errno != 0))
 		perror("VIDIOC_QUERYCAP");
 }
 
@@ -1012,54 +1045,25 @@ void retrace_media_ioc_request_alloc(int fd_retrace, json_object *ioctl_args)
 	/* Associate the original request file descriptor with the current request file descriptor. */
 	add_fd(request_fd_trace, request_fd_retrace);
 
-	if (verbose || (errno != 0))
+	if (is_verbose() || (errno != 0))
 		perror("MEDIA_IOC_REQUEST_ALLOC");
-}
-
-void retrace_dma_buf_ioctl_sync(int fd_retrace, json_object *ioctl_args_user)
-{
-	struct dma_buf_sync sync = {};
-
-	json_object *sync_obj;
-	json_object_object_get_ex(ioctl_args_user, "dma_buf_sync",&sync_obj);
-
-	json_object *flags_obj;
-	json_object_object_get_ex(sync_obj, "flags",&flags_obj);
-	sync.flags = json_object_get_int(flags_obj);
-
-	ioctl(fd_retrace, DMA_BUF_IOCTL_SYNC, &sync);
-
-	if (verbose || (errno != 0))
-		perror("DMA_BUF_IOCTL_SYNC");
 }
 
 void retrace_ioctl_media(int fd_retrace, long cmd, json_object *ioctl_args_driver)
 {
 	switch (cmd) {
-	case MEDIA_IOC_DEVICE_INFO:
-	case MEDIA_IOC_ENUM_ENTITIES:
-	case MEDIA_IOC_ENUM_LINKS:
-	case MEDIA_IOC_SETUP_LINK:
-		break;
-	case MEDIA_IOC_G_TOPOLOGY: {
-		struct media_v2_topology top = {};
-		ioctl(fd_retrace, MEDIA_IOC_G_TOPOLOGY, &top);
-		if (verbose || (errno != 0))
-			perror("MEDIA_IOC_G_TOPOLOGY");
-		break;
-	}
 	case MEDIA_IOC_REQUEST_ALLOC:
 		retrace_media_ioc_request_alloc(fd_retrace, ioctl_args_driver);
 		break;
 	case MEDIA_REQUEST_IOC_QUEUE: {
 		ioctl(fd_retrace, MEDIA_REQUEST_IOC_QUEUE);
-		if (verbose || (errno != 0))
+		if (is_verbose() || (errno != 0))
 			perror("MEDIA_REQUEST_IOC_QUEUE");
 		break;
 	}
 	case MEDIA_REQUEST_IOC_REINIT: {
 		ioctl(fd_retrace, MEDIA_REQUEST_IOC_REINIT);
-		if (verbose || (errno != 0))
+		if (is_verbose() || (errno != 0))
 			perror("MEDIA_REQUEST_IOC_REINIT");
 		break;
 	}
@@ -1124,6 +1128,10 @@ void retrace_ioctl(json_object *syscall_obj)
 	json_object *fd_trace_obj;
 	json_object_object_get_ex(syscall_obj, "fd", &fd_trace_obj);
 	fd_retrace = get_fd_retrace_from_fd_trace(json_object_get_int(fd_trace_obj));
+	if (fd_retrace < 0) {
+		fprintf(stderr, "Retrace error: %s: bad file descriptor\n", __func__);
+		return;
+	}
 
 	json_object *cmd_obj;
 	json_object_object_get_ex(syscall_obj, "ioctl", &cmd_obj);
@@ -1156,7 +1164,6 @@ void write_to_output_buffer(unsigned char *buffer_pointer, int bytesused, json_o
 	size_t number_of_lines;
 	std::string compressed_video_data;
 
-
 	json_object *mem_array_obj;
 	json_object_object_get_ex(mem_obj, "mem_array", &mem_array_obj);
 	number_of_lines = json_object_array_length(mem_array_obj);
@@ -1184,34 +1191,8 @@ void write_to_output_buffer(unsigned char *buffer_pointer, int bytesused, json_o
 		}
 	}
 
-	if (verbose) {
-		fprintf(stderr, "\nWrite to Output Buffer\n");
-		fprintf(stderr, "bytesused: %d, byteswritten: %d\n", bytesused, byteswritten);
-		fprintf(stderr, "\n");
-	}
-}
-
-void write_decoded_frames_to_yuv_file_retrace(unsigned char *buffer_pointer, int bytesused)
-{
-	int byteswritten = 0;
-	int expected_length = (int) get_expected_length_retrace();
-
-	FILE *fp = fopen(retrace_filename.c_str(), "a");
-	for (int i = 0; i < bytesused; i++) {
-		if (i < expected_length) {
-			fwrite(&buffer_pointer[i], sizeof(unsigned char), 1, fp);
-			byteswritten++;
-		}
-	}
-	fclose(fp);
-
-	if (verbose){
-		fprintf(stderr, "\nWrite to File\n");
-		fprintf(stderr, "%s\n", retrace_filename.c_str());
-		fprintf(stderr, "buffer_pointer address: %ld, bytesused: %d, byteswritten: %d\n", (long) buffer_pointer, bytesused, byteswritten);
-		fprintf(stderr, "\n");
-		print_context();
-	}
+	if (is_verbose())
+		fprintf(stderr, "%s: bytesused: %d, byteswritten: %d\n", __func__, bytesused, byteswritten);
 }
 
 void retrace_mem(json_object *mem_obj)
@@ -1242,15 +1223,11 @@ void retrace_mem(json_object *mem_obj)
 	if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE || type == V4L2_BUF_TYPE_VIDEO_OUTPUT)
 		write_to_output_buffer(buffer_pointer, bytesused, mem_obj);
 
-	/* Get the decoded capture buffer from memory and write it to a binary yuv file. */
-	if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE || type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		write_decoded_frames_to_yuv_file_retrace(buffer_pointer, bytesused);
-
-	if (verbose) {
-		fprintf(stderr, "\n%s\n", __func__);
-		fprintf(stderr, "%s, bytesused: %d, offset: %d, buffer_address_retrace: %ld\n",
-		        buftype2s(type).c_str(), bytesused, offset, buffer_address_retrace);
-		print_context();
+	if (is_verbose()) {
+		fprintf(stderr, "%s: %s, bytesused: %d, offset: %d, addr: %ld\n",
+		        __func__, buftype2s(type).c_str(), bytesused, offset, buffer_address_retrace);
+		if (is_debug())
+			print_context();
 	}
 }
 
@@ -1258,7 +1235,6 @@ void retrace_object(json_object *jobj)
 {
 	errno = 0;
 	json_object *temp_obj;
-
 	if (json_object_object_get_ex(jobj, "ioctl", &temp_obj)) {
 		retrace_ioctl(jobj);
 		return;
@@ -1298,6 +1274,11 @@ void retrace_object(json_object *jobj)
 		retrace_mem(jobj);
 		return;
 	}
+
+	if (json_object_object_get_ex(jobj, "package_version", &temp_obj)) {
+		compare_program_versions(jobj);
+		return;
+	}
 }
 
 void retrace_array(json_object *root_array_obj)
@@ -1312,77 +1293,8 @@ void retrace_array(json_object *root_array_obj)
 	}
 }
 
-int get_options_retrace(int argc, char *argv[])
+int retracer (std::string trace_filename)
 {
-	int ch;
-	do {
-		ch = getopt_long(argc, argv, short_options_retracer, long_options_retracer, NULL);
-		switch (ch) {
-		case OptSetDevice_Retracer: {
-			std::string device = optarg;
-			if (device[0] >= '0' && device[0] <= '9' && device.length() <= 3) {
-				static char newdev[20];
-				sprintf(newdev, "/dev/video%s", optarg);
-				dev_path_video = newdev;
-				fprintf(stderr, "Using: %s\n", dev_path_video.c_str());
-			} else {
-				return 1;
-			}
-			break;
-		}
-		case OptSetMediaDevice_Retracer: {
-			std::string device = optarg;
-			if (device[0] >= '0' && device[0] <= '9' && device.length() <= 3) {
-				static char newdev[20];
-				sprintf(newdev, "/dev/media%s", optarg);
-				device = newdev;
-				dev_path_media = newdev;
-				fprintf(stderr, "Using: %s\n", dev_path_media.c_str());
-			} else {
-				return 1;
-			}
-			break;
-		}
-		case OptVerbose_Retracer:
-			verbose = true;
-			break;
-		case '?':
-		case ':':
-			return 1;
-		default:
-			break;
-		}
-	} while (ch != -1);
-
-	return 0;
-}
-
-void print_help_retracer(void)
-{
-		fprintf(stderr, "v4l2-tracer retrace [retrace options] -- <trace_file>.json\n"
-	        "\t-d, --device <dev>   Use a different video device than specified in the trace file.\n"
-	        "\t                     <dev> must be a digit corresponding to an existing /dev/video<dev> \n"
-	        "\t-h, --help           Display retrace help.\n"
-	        "\t-m, --media <dev>    Use a different media device than specified in the trace file.\n"
-	        "\t                     <dev> must be a digit corresponding to an existing /dev/media<dev> \n"
-	        "\t-v, --verbose        Turn on verbose reporting\n\n");
-}
-
-int retracer(int argc, char *argv[])
-{
-	if ((get_options_retrace(argc, argv)) || (optind == argc)) {
-		print_help_retracer();
-		return 1;
-	}
-
-	std::string trace_filename = argv[optind];
-
-	if (trace_filename.substr(trace_filename.length()-4, trace_filename.npos) != "json") {
-		fprintf(stderr, "Trace file must be json-formatted: %s\n", trace_filename.c_str());
-		print_help_retracer();
-		return 1;
-	}
-
 	FILE *trace_file = fopen(trace_filename.c_str(), "r");
 	if (trace_file == NULL) {
 		fprintf(stderr, "Trace file error: %s\n", trace_filename.c_str());
@@ -1392,23 +1304,15 @@ int retracer(int argc, char *argv[])
 
 	fprintf(stderr, "Retracing: %s\n", trace_filename.c_str());
 
-	/* Create file to hold the decoded frames.  Discard previous retraced file if any. */
-	retrace_filename = trace_filename;
-	retrace_filename = retrace_filename.replace(5, retrace_filename.npos, "_retrace");
-	retrace_filename += ".yuv";
-
 	json_object *root_array_obj = json_object_from_file(trace_filename.c_str());
+
 	if (root_array_obj == nullptr) {
 		fprintf(stderr, "Retrace error from file: %s\n", trace_filename.c_str());
 		return 1;
 	}
-	/* Discard any previous retrace with same name. */
-	fclose(fopen(retrace_filename.c_str(), "w"));
 
 	retrace_array(root_array_obj);
 	json_object_put(root_array_obj);
-
-	fprintf(stderr, "Retracing complete in %s\n", retrace_filename.c_str());
 
 	return 0;
 }

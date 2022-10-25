@@ -27,21 +27,13 @@ struct trace_context {
 	int pic_order_cnt_lsb;
 	int max_pic_order_cnt_lsb;
 	pthread_mutex_t lock;
+	std::string media_device;
 	__u32 compression_format;
 	std::string trace_filename;
 	int compressed_frame_count;
 	std::list<long> decode_order;
 	std::list<struct buffer_trace> buffers;
 	std::unordered_map<int, std::string> devices; /* key:fd, value: path of the device */
-};
-
-struct trace_options {
-	bool options_are_set;
-	bool verbose;
-	bool pretty_print_all;
-	bool pretty_print_mem;
-	bool write_decoded_data_to_yuv_file;
-	bool write_decoded_data_to_json_file;
 };
 
 std::string ver2s(unsigned int version)
@@ -51,46 +43,10 @@ std::string ver2s(unsigned int version)
 	return buf;
 }
 
-struct trace_options options;
-
 struct trace_context ctx_trace = {
 	.lock = PTHREAD_MUTEX_INITIALIZER
 };
 
-bool options_are_set(void)
-{
-	return options.options_are_set;
-}
-
-void set_options(void)
-{
-	options.verbose = getenv("TRACE_OPTION_VERBOSE") ? true : false;
-	options.pretty_print_mem = getenv("TRACE_OPTION_PRETTY_PRINT_MEM") ? true : false;
-	options.pretty_print_all = getenv("TRACE_OPTION_PRETTY_PRINT_ALL") ? true : false;
-	options.write_decoded_data_to_json_file = getenv("TRACE_OPTION_WRITE_DECODED_TO_JSON_FILE") ? true : false;
-	options.write_decoded_data_to_yuv_file = getenv("TRACE_OPTION_WRITE_DECODED_TO_YUV_FILE") ? true : false;
-	options.options_are_set = true;
-}
-
-bool option_is_set_verbose(void)
-{
-	return options.verbose;
-}
-
-bool option_is_set_pretty_print_mem(void)
-{
-	return options.pretty_print_mem;
-}
-
-bool option_is_set_pretty_print_all(void)
-{
-	return options.pretty_print_all;
-}
-
-bool option_is_set_write_decoded_data_to_json_file(void)
-{
-	return options.write_decoded_data_to_json_file;
-}
 
 bool is_video_or_media_device(const char *path)
 {
@@ -174,6 +130,22 @@ __u32 get_compression_format(void)
 	return compression_format;
 }
 
+void set_media_device(std::string media_device)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	ctx_trace.media_device = media_device;
+	pthread_mutex_unlock(&ctx_trace.lock);
+}
+
+std::string get_media_device(void)
+{
+	std::string media_device;
+	pthread_mutex_lock(&ctx_trace.lock);
+	media_device = ctx_trace.media_device;
+	pthread_mutex_unlock(&ctx_trace.lock);
+	return media_device;
+}
+
 void set_compressed_frame_count(int count)
 {
 	pthread_mutex_lock(&ctx_trace.lock);
@@ -202,7 +174,7 @@ void print_decode_order(void)
 
 void set_decode_order(long decode_order)
 {
-	if (option_is_set_verbose())
+	if (is_debug())
 		fprintf(stderr, "%s: %ld\n", __func__, decode_order);
 
 	std::list<long>::iterator it;
@@ -212,7 +184,7 @@ void set_decode_order(long decode_order)
 		ctx_trace.decode_order.push_front(decode_order);
 	pthread_mutex_unlock(&ctx_trace.lock);
 
-	if (option_is_set_verbose())
+	if (is_debug())
 		print_decode_order();
 }
 
@@ -382,7 +354,7 @@ long get_buffer_bytesused_trace(int fd, __u32 offset)
 
 void set_buffer_display_order(int fd, __u32 offset, long display_order)
 {
-	if (option_is_set_verbose())
+	if (is_debug())
 		fprintf(stderr, "%s: %ld\n", __func__, display_order);
 	pthread_mutex_lock(&ctx_trace.lock);
 	for (auto &b : ctx_trace.buffers) {
@@ -492,12 +464,12 @@ void trace_mem_decoded(void)
 				break;
 			if (it->bytesused < expected_length)
 				break;
-			if (option_is_set_verbose())
+			if (is_debug())
 				fprintf(stderr, "%s, displaying: %ld, %s, index: %d\n",
 				        __func__, it->display_order, buftype2s(it->type).c_str(), it->index);
 			displayed_count++;
 
-			if (options.write_decoded_data_to_yuv_file) {
+			if (getenv("V4L2_TRACER_OPTION_WRITE_DECODED_TO_YUV_FILE")) {
 				std::string filename = getenv("TRACE_ID");
 				filename +=  ".yuv";
 				FILE *fp = fopen(filename.c_str(), "a");
@@ -533,8 +505,8 @@ void s_ext_ctrls_setup(struct v4l2_ext_controls *ext_controls)
 	if (ext_controls->which != V4L2_CTRL_WHICH_REQUEST_VAL)
 		return;
 
-	if (option_is_set_verbose())
-		fprintf(stderr, "\n%s\n", __func__);
+	if (is_debug())
+		fprintf(stderr, "\n%s", __func__);
 
 	/*
 	 * Since userspace sends H264 frames out of order, get information
@@ -556,7 +528,7 @@ void s_ext_ctrls_setup(struct v4l2_ext_controls *ext_controls)
 			int prev_pic_order_cnt_lsb = get_pic_order_cnt_lsb();
 			int pic_order_cnt_lsb = ctrl.p_h264_decode_params->pic_order_cnt_lsb;
 
-			if (option_is_set_verbose()) {
+			if (is_debug()) {
 				fprintf(stderr, "\tprev_pic_order_cnt_lsb: %d\n", prev_pic_order_cnt_lsb);
 				fprintf(stderr, "\tprev_pic_order_cnt_msb: %ld\n", prev_pic_order_cnt_msb);
 				fprintf(stderr, "\tpic_order_cnt_lsb: %d\n", pic_order_cnt_lsb);
@@ -591,7 +563,7 @@ void s_ext_ctrls_setup(struct v4l2_ext_controls *ext_controls)
 				pic_order_cnt_msb = prev_pic_order_cnt_msb + (pic_order_cnt_lsb - prev_pic_order_cnt_lsb);
 			}
 
-			if (option_is_set_verbose())
+			if (is_debug())
 				fprintf(stderr, "\tpic_order_cnt_msb: %ld\n", pic_order_cnt_msb);
 
 			set_pic_order_cnt_lsb(pic_order_cnt_lsb);
@@ -606,8 +578,8 @@ void s_ext_ctrls_setup(struct v4l2_ext_controls *ext_controls)
 
 void qbuf_setup(struct v4l2_buffer *buf)
 {
-	if (option_is_set_verbose())
-		fprintf(stderr, "\n%s: %s, index: %d\n", __func__, buftype2s(buf->type).c_str(), buf->index);
+	if (is_debug())
+		fprintf(stderr, "%s: %s, index: %d\n", __func__, buftype2s(buf->type).c_str(), buf->index);
 
 	int buf_fd = get_buffer_fd_trace(buf->type, buf->index);
 	__u32 buf_offset = get_buffer_offset_trace(buf->type, buf->index);
@@ -640,7 +612,7 @@ void qbuf_setup(struct v4l2_buffer *buf)
 
 		set_buffer_display_order(buf_fd, buf_offset, get_decode_order());
 
-		if (option_is_set_verbose()) {
+		if (is_debug()) {
 			print_decode_order();
 			print_buffers_trace();
 		}
@@ -649,7 +621,7 @@ void qbuf_setup(struct v4l2_buffer *buf)
 
 void streamoff_cleanup(v4l2_buf_type buf_type)
 {
-	if (option_is_set_verbose()) {
+	if (is_verbose()) {
 		fprintf(stderr, "\nVIDIOC_STREAMOFF: %s\n", buftype2s(buf_type).c_str());
 		fprintf(stderr, "compression: %s, pixelformat: %s %s, width: %d, height: %d\n",
 		        pixfmt2s(get_compression_format()).c_str(), pixfmt2s(get_pixelformat()).c_str(),
@@ -737,7 +709,7 @@ void querybuf_setup(int fd, struct v4l2_buffer *buf)
 
 void write_json_object_to_json_file(json_object *jobj, int flags)
 {
-	if (options.pretty_print_all)
+	if (getenv("V4L2_TRACER_OPTION_PRETTY_PRINT_ALL"))
 		flags = JSON_C_TO_STRING_PRETTY;
 
 	std::string json_str = json_object_to_json_string_ext(jobj, flags);
