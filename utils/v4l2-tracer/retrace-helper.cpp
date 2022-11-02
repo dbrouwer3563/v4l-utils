@@ -26,28 +26,20 @@ static struct retrace_context ctx_retrace = {
 	.lock = PTHREAD_MUTEX_INITIALIZER
 };
 
-std::pair<std::string, std::string> retrace_paths;
-
-void set_retrace_paths(std::string path_media, std::string path_video)
+/*
+ * Find the corresponding /dev/mediaX /dev/videoX for the driver name and linked entities.
+ * Returns the /dev/mediaX /dev/videoX pair.
+ */
+std::pair<std::string, std::string> find_devices(std::string driver, std::list<std::string> linked_entities_in_json_file)
 {
-	retrace_paths = std::make_pair(path_media, path_video);
-}
-
-std::pair<std::string, std::string> get_retrace_paths()
-{
-	return retrace_paths;
-}
-
-std::pair<std::string, std::string> search_for_retrace_paths(std::string driver, std::list<std::string> linked_entities_in_json_file)
-{
-	std::pair<std::string, std::string> retrace_paths;
+	std::pair<std::string, std::string> device_paths;
 
 	DIR *dp = opendir("/dev");
 	if (dp == nullptr)
-		return retrace_paths;
+		return device_paths;
+
 
 	struct dirent *ep;
-
 	while ((ep = readdir(dp))) {
 
 		const char *name = ep->d_name;
@@ -56,7 +48,11 @@ std::pair<std::string, std::string> search_for_retrace_paths(std::string driver,
 
 		std::string media_entity_name;
 		std::string media_devname = std::string("/dev/") + name;
+
+		setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
 		int media_fd = open(media_devname.c_str(), O_RDONLY);
+		unsetenv("V4L2_TRACER_PAUSE_TRACE");
+
 		if (media_fd < 0)
 			continue;
 
@@ -72,25 +68,26 @@ std::pair<std::string, std::string> search_for_retrace_paths(std::string driver,
 			continue;
 		}
 
-		std::list<std::string> linked_entities  = get_entities_linked_to_path_video(media_fd, path_video);
+		std::list<std::string> linked_entities  = get_linked_entities(media_fd, path_video);
 		if (linked_entities.size() == 0) {
 			close(media_fd);
 			continue;
 		}
 
-		//just find one match that's enough
+		/* TODO: this takes the first match, check if this works for non-codec devices. */
 		for (auto &e : linked_entities_in_json_file) {
 			if (find(linked_entities.begin(), linked_entities.end(), e) != linked_entities.end()) {
-				retrace_paths = std::make_pair(media_devname, path_video);
+				device_paths = std::make_pair(media_devname, path_video);
 				break;
 			}
 		}
 		close(media_fd);
-		if (!retrace_paths.first.empty())
+		if (!device_paths.first.empty())
 			break;
 	}
 	closedir(dp);
-	return retrace_paths;
+
+	return device_paths;
 }
 
 bool buffer_in_retrace_context(int fd, __u32 offset)

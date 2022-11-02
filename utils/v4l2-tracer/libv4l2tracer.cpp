@@ -40,10 +40,21 @@ int open(const char *path, int oflag, ...)
 	original_open = (int (*)(const char*, int, ...)) dlsym(RTLD_NEXT, "open");
 	int fd = (*original_open)(path, oflag, mode);
 
+	if (is_verbose())
+		fprintf(stderr, "\n%s: fd: %d, %s\n", __func__, fd, path);
+
+	/* Don't trace the opening if tracing is paused. */
+	if (getenv("V4L2_TRACER_PAUSE_TRACE"))
+		return fd;
+
+	/* Only trace the opening of video/media devices. */
 	if (is_video_or_media_device(path)) {
-		add_device(fd, path);
 		trace_open(fd, path, oflag, mode, false);
+		add_device(fd, path);
 	}
+
+	if (is_debug())
+		print_devices();
 
 	return fd;
 }
@@ -63,10 +74,16 @@ int open64(const char *path, int oflag, ...)
 	original_open64 = (int (*)(const char*, int, ...)) dlsym(RTLD_NEXT, "open64");
 	int fd = (*original_open64)(path, oflag, mode);
 
+	if (getenv("V4L2_TRACER_PAUSE_TRACE"))
+		return fd;
+
 	if (is_video_or_media_device(path)) {
 		add_device(fd, path);
 		trace_open(fd, path, oflag, mode, true);
 	}
+
+	if (is_debug())
+		print_devices();
 
 	return fd;
 }
@@ -75,6 +92,9 @@ int close(int fd)
 {
 	errno = 0;
 	std::string path = get_device(fd);
+
+	if (is_verbose())
+		fprintf(stderr, "\n%s: fd: %d, %s\n", __func__, fd, path.c_str());
 
 	/* Only trace the close if a corresponding open was also traced. */
 	if (!path.empty()) {
@@ -89,6 +109,9 @@ int close(int fd)
 		if (!count_devices())
 			close_json_file();
 	}
+
+	if (is_debug())
+		print_devices();
 
 	int (*original_close)(int fd);
 	original_close = (int (*)(int)) dlsym(RTLD_NEXT, "close");
@@ -180,7 +203,6 @@ int ioctl(int fd, unsigned long cmd, ...)
 	json_object *ioctl_obj = json_object_new_object();
 	json_object_object_add(ioctl_obj, "fd", json_object_new_int(fd));
 	json_object_object_add(ioctl_obj, "ioctl", json_object_new_string(ioctl2s(cmd).c_str()));
-
 
 	/* Trace the ioctl arguments provided by userspace. */
 	json_object *ioctl_args_userspace = trace_ioctl_args(fd, cmd, arg);

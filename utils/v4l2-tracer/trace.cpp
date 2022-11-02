@@ -13,11 +13,18 @@ void trace_open(int fd, const char *path, int oflag, mode_t mode, bool is_open64
 	std::string path_media;
 	std::string path_video;
 	std::string path_str = path;
+	bool is_video_device = path_str.find("video") != path_str.npos;
+	bool is_media_device = path_str.find("media") != path_str.npos;
 
-	if (path_str.find("video") != path_str.npos) {
+	if (is_video_device) {
+		path_video = path;
 		path_media = get_path_media_from_path_video(path_str);
+		setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
 		media_fd = open(path_media.c_str(), O_RDONLY);
-	} else if (path_str.find("media") != path_str.npos) {
+		unsetenv("V4L2_TRACER_PAUSE_TRACE");
+
+	} else if (is_media_device) {
+		path_media = path;
 		path_video = get_path_video_from_fd_media(fd);
 		media_fd = fd;
 	}
@@ -33,19 +40,19 @@ void trace_open(int fd, const char *path, int oflag, mode_t mode, bool is_open64
 	json_object_object_add(open_args, "bus_info", json_object_new_string(info.bus_info));
 
 	json_object_object_add(open_args, "path", json_object_new_string(path));
-	if (path_str.find("video") != path_str.npos) {
+	if (is_video_device)
 		json_object_object_add(open_args, "path_media", json_object_new_string(path_media.c_str()));
-	} else if (path_str.find("media") != path_str.npos) {
+	else if (is_media_device)
 		json_object_object_add(open_args, "path_video", json_object_new_string(path_video.c_str()));
-	}
-	std::list<std::string> linked_entities = get_entities_linked_to_path_video(media_fd, path_video);
+
+	std::list<std::string> linked_entities = get_linked_entities(media_fd, path_video);
+
 	json_object *linked_entities_obj = json_object_new_array();
 	for (auto &e : linked_entities)
 		json_object_array_add(linked_entities_obj, json_object_new_string(e.c_str()));
 	json_object_object_add(open_args, "linked_entities", linked_entities_obj);
 
-	/* Don't close the media_fd if this is a call to open it. */
-	if ((path_str.find("video") != path_str.npos) && (media_fd != -1))
+	if (is_video_device)
 		close(media_fd);
 
 	json_object_object_add(open_args, "oflag", json_object_new_string(val2s(oflag, open_val_def).c_str()));
@@ -111,7 +118,7 @@ json_object *trace_buffer(unsigned char *buffer_pointer, __u32 bytesused)
 		}
 	}
 
-	/* Trace the last line if it was less than a full 16 bytes. */
+	/* Trace the last line if it was less than a full line. */
 	if (byte_count_per_line)
 		json_object_array_add(mem_array_obj, json_object_new_string(s.c_str()));
 

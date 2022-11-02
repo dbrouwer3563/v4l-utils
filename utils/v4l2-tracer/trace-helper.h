@@ -13,6 +13,7 @@ void add_device(int fd, std::string path);
 std::string get_device(int fd);
 int remove_device(int fd);
 int count_devices(void);
+void print_devices(void);
 
 void set_media_device(std::string media_device);
 std::string get_media_device(void);

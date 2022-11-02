@@ -60,6 +60,9 @@ bool is_video_or_media_device(const char *path)
 
 void add_device(int fd, std::string path)
 {
+	if (is_debug())
+		fprintf(stderr, "\t%s, %d, %s\n", __func__, fd, path.c_str());
+
 	std::pair<int, std::string> new_pair = std::make_pair(fd, path);
 	pthread_mutex_lock(&ctx_trace.lock);
 	ctx_trace.devices.insert(new_pair);
@@ -80,6 +83,8 @@ std::string get_device(int fd)
 
 int remove_device(int fd)
 {
+	if (is_debug())
+		fprintf(stderr, "\t%s, %d\n", __func__, fd);
 	int ret = 0;
 	pthread_mutex_lock(&ctx_trace.lock);
 	ret = ctx_trace.devices.erase(fd);
@@ -94,6 +99,16 @@ int count_devices(void)
 	count = ctx_trace.devices.size();
 	pthread_mutex_unlock(&ctx_trace.lock);
 	return count;
+}
+
+void print_devices(void)
+{
+	pthread_mutex_lock(&ctx_trace.lock);
+	if (ctx_trace.devices.size())
+		fprintf(stderr, "Devices:\n");
+	for (auto &device_pair : ctx_trace.devices)
+		fprintf(stderr, "fd: %d, path: %s\n", device_pair.first, device_pair.second.c_str());
+	pthread_mutex_unlock(&ctx_trace.lock);
 }
 
 void set_pixelformat_trace(__u32 width, __u32 height, __u32 pixelformat)

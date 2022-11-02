@@ -8,6 +8,8 @@
 #include <iomanip>
 #include "v4l2-tracer-common.h"
 
+std::string path_video_global;
+std::string path_media_global;
 
 bool is_verbose()
 {
@@ -24,7 +26,7 @@ void print_v4l2_tracer_info(void)
 {
 	fprintf(stderr, "v4l2-tracer %s%s\n", PACKAGE_VERSION, STRING(GIT_COMMIT_CNT));
 	if (strlen(STRING(GIT_SHA)))
-		fprintf(stderr, "v4l2-tracer SHA: %s %s\n", STRING(GIT_SHA), STRING(GIT_COMMIT_DATE));
+		fprintf(stderr, "v4l2-tracer SHA: '%s' %s\n", STRING(GIT_SHA), STRING(GIT_COMMIT_DATE));
 }
 
 void print_usage(void)
@@ -34,18 +36,21 @@ void print_usage(void)
 	        "\tv4l2-tracer [options] retrace <trace_file>.json\n\n"
 
 	        "\tCommon options:\n"
+	        "\t\t-e, --prettymem   Add whitespace in JSON file just to the memory arrays.\n"
+	        "\t\t-g, --debug       Turn on verbose reporting plus additional info for debugging.\n"
 	        "\t\t-h, --help        Display this message.\n"
-	        "\t\t-p, --pretty      Add whitespace in json file to improve readability.\n"
-	        "\t\t-e, --prettymem   Add whitespace in json file just to the memory arrays.\n"
-	        "\t\t-r  --raw         Write decoded video frame data to json file.\n"
+	        "\t\t-p, --pretty      Add whitespace in JSON file to improve readability.\n"
+	        "\t\t-r  --raw         Write decoded video frame data to JSON file.\n"
 	        "\t\t-v, --verbose     Turn on verbose reporting.\n"
-	        "\t\t-w, --debug       Turn on verbose reporting plus many more details.\n"
 	        "\t\t-y, --yuv         Write decoded video frame data to yuv file.\n\n"
 
 	        "\tRetrace options:\n"
-			"\t\t-d, --device <dev>   Retrace with a specific video device.\n"
-	        "\t\t                     <dev> must be a digit corresponding to\n"
-	        "\t\t                     /dev/video<dev> \n\n");
+	        "\t\t-d, --video_device <dev>   Retrace with a specific video device.\n"
+	        "\t\t                           <dev> must be a digit corresponding to\n"
+	        "\t\t                           /dev/video<dev> \n\n"
+	        "\t\t-m, --media_device <dev>   Retrace with a specific media device.\n"
+	        "\t\t                           <dev> must be a digit corresponding to\n"
+	        "\t\t                           /dev/media<dev> \n\n");
 }
 
 /* Convert a long val to an octal string. If num is 0, return an empty string. */
@@ -392,7 +397,6 @@ std::string get_path_media_from_path_video(std::string path_video_arg)
 		return "";
 
 	struct dirent *ep;
-
 	while ((ep = readdir(dp)) && path_media.empty()) {
 
 		const char *name = ep->d_name;
@@ -401,16 +405,18 @@ std::string get_path_media_from_path_video(std::string path_video_arg)
 
 		std::string media_entity_name;
 		std::string media_devname = std::string("/dev/") + name;
+
+		/* Don't trace v4l2-tracer's own "open" call. */
+		setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
 		int media_fd = open(media_devname.c_str(), O_RDONLY);
+		unsetenv("V4L2_TRACER_PAUSE_TRACE");
+
 		if (media_fd < 0)
 			continue;
 
 		struct media_v2_topology topology = {};
-		if (ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology)) {
-			closedir(dp);
-			close(media_fd);
-			return "";
-		}
+		if (ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology))
+			continue;
 
 		auto ents = new media_v2_entity[topology.num_entities];
 		topology.ptr_entities = (uintptr_t)ents;
@@ -508,6 +514,7 @@ std::string get_path_media_from_path_video(std::string path_video_arg)
 		path_media = media_devname;
 	}
 	closedir(dp);
+
 	return path_media;
 }
 
@@ -557,7 +564,7 @@ std::string get_path_video_from_fd_media(int fd)
 	return path_video;
 }
 
-std::list<std::string> get_entities_linked_to_path_video(int media_fd, std::string path_video)
+std::list<std::string> get_linked_entities(int media_fd, std::string path_video)
 {
 	std::list<std::string> linked_entities;
 

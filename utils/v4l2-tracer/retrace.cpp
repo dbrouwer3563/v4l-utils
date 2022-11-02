@@ -149,9 +149,10 @@ void retrace_open(json_object *jobj, bool is_open64)
 	json_object_object_get_ex(open_args_obj, "path", &path_obj);
 	std::string path = json_object_get_string(path_obj);
 
-	std::pair<std::string, std::string> retrace_paths;
+	/* If user did not specify either a video or media device, try to match the driver. */
+	if (!getenv("V4L2_TRACER_OPTION_SET_VIDEO_DEVICE") &&
+	    !getenv("V4L2_TRACER_OPTION_SET_MEDIA_DEVICE")) {
 
-	if (!getenv("V4L2_TRACER_OPTION_SET_DEVICE")) {
 		std::string driver;
 		json_object *driver_obj;
 		if (json_object_object_get_ex(open_args_obj, "driver", &driver_obj))
@@ -159,33 +160,33 @@ void retrace_open(json_object *jobj, bool is_open64)
 
 		json_object *linked_entities_obj;
 		json_object_object_get_ex(open_args_obj, "linked_entities", &linked_entities_obj);
-		std::list<std::string> linked_entities_in_json_file;
+		std::list<std::string> linked_entities;
 		for (size_t i = 0; i < array_list_length(json_object_get_array(linked_entities_obj)); i++) {
 			std::string entity_name = json_object_get_string(json_object_array_get_idx(linked_entities_obj, i));
-			linked_entities_in_json_file.push_back(entity_name);
+			linked_entities.push_back(entity_name);
 		}
-		retrace_paths = search_for_retrace_paths(driver, linked_entities_in_json_file);
-		if (!retrace_paths.first.empty()) {
-			set_retrace_paths(retrace_paths.first, retrace_paths.second);
+
+		std::pair<std::string, std::string> device_paths = find_devices(driver, linked_entities);
+
+		if (!device_paths.first.empty()) {
+			path_media_global = device_paths.first;
+			path_video_global = device_paths.second;
 			if (is_verbose())
 				fprintf(stderr, "Retracing on: %s, %s, %s\n",
-				        driver.c_str(), retrace_paths.first.c_str(), retrace_paths.second.c_str());
+				        driver.c_str(), device_paths.first.c_str(), device_paths.second.c_str());
+		} else {
+			/*
+			 * Don't try to open media devices that can't be found. The trace file might have
+			 * multiple open calls and only the last one needs to work.
+			 */
+			return;
 		}
 	}
-	retrace_paths = get_retrace_paths();
 
-	/*
-	 * Don't try to open media devices that can't be found.
-	 * This won't be fatal to the retracing if the trace file has multiple open calls.
-	 */
-	if (retrace_paths.first.empty())
-		return;
-
-	if (path.find("media") != path.npos) {
-		path = retrace_paths.first;
-	} else if (path.find("video") != path.npos) {
-		path = retrace_paths.second;
-	}
+	if (path.find("media") != path.npos)
+		path = path_media_global;
+	else if (path.find("video") != path.npos)
+		path = path_video_global;
 
 	json_object *oflag_obj;
 	json_object_object_get_ex(open_args_obj, "oflag", &oflag_obj);
@@ -524,7 +525,7 @@ void retrace_vidioc_expbuf(int fd_retrace, json_object *ioctl_args_user, json_ob
 	add_fd(buf_fd_trace, buf_fd_retrace);
 
 	if (is_verbose() || (errno != 0)) {
-		fprintf(stderr, "%s, index: %d, fd: %d", buftype2s(export_buffer.type).c_str(), export_buffer.index, buf_fd_retrace);
+		fprintf(stderr, "%s, index: %d, fd: %d, ", buftype2s(export_buffer.type).c_str(), export_buffer.index, buf_fd_retrace);
 		perror("VIDIOC_EXPBUF");
 		if (is_debug())
 			print_context();

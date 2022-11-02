@@ -6,8 +6,7 @@
 #ifndef RETRACE_HELPER_H
 #define RETRACE_HELPER_H
 
-std::pair<std::string, std::string> get_retrace_paths();
-std::pair<std::string, std::string> search_for_retrace_paths(std::string driver, std::list<std::string> linked_entities_in_json_file);
+std::pair<std::string, std::string> find_devices(std::string driver, std::list<std::string> linked_entities_in_json_file);
 
 bool buffer_in_retrace_context(int fd, __u32 offset = 0);
 int get_buffer_fd_retrace(__u32 type, __u32 index);

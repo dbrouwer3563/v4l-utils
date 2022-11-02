@@ -40,6 +40,9 @@ struct val_def {
 	const char *str;
 };
 
+extern std::string path_media_global;
+extern std::string path_video_global;
+
 bool is_verbose(void);
 bool is_debug(void);
 
@@ -65,10 +68,7 @@ std::string which2s(unsigned long which);
 
 std::string get_path_media_from_path_video(std::string path_video_arg);
 std::string get_path_video_from_fd_media(int fd);
-std::list<std::string> get_entities_linked_to_path_video(int media_fd, std::string path_video);
-
-void set_retrace_paths(std::string path_media, std::string path_video);
-std::pair<std::string, std::string> get_retrace_paths(void);
+std::list<std::string> get_linked_entities(int media_fd, std::string path_video);
 
 #include "v4l2-tracer-info-gen.h"
 
@@ -79,6 +79,7 @@ constexpr val_def which_val_def[] = {
 	{ -1, "" }
 };
 
+//to do: add more flags and convert from val to flag
 constexpr val_def open_val_def[] = {
 	{ O_RDONLY,	"O_RDONLY" },
 	{ O_WRONLY,	"O_WRONLY" },
