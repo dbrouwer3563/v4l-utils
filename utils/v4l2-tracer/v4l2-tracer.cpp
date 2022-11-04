@@ -58,7 +58,7 @@ int get_options(int argc, char *argv[])
 			return -1;
 		}
 
-		/* Avoid reading the options for the application to be traced. */
+		/* Avoid reading the tracee's options. */
 		if ((strcmp(argv[optind], "trace") == 0) || (strcmp(argv[optind], "retrace") == 0))
 			return 0;
 
@@ -72,24 +72,10 @@ int get_options(int argc, char *argv[])
 				fprintf(stderr, "%d: <dev> \'%s\' must be a digit\n", __LINE__, device_num.c_str());
 				return -1;
 			}
-
 			if (device_num[0] >= '0' && device_num[0] <= '9' && device_num.length() <= 3) {
 				std::string path_video = "/dev/video";
 				path_video += optarg;
-				std::string path_media = get_path_media_from_path_video(path_video);
-				if (path_media.empty()) {
-					fprintf(stderr, "%d: cannot use \'%s\'\n", __LINE__, path_video.c_str());
-					return -1;
-				}
-
-				if (getenv("V4L2_TRACER_OPTION_SET_MEDIA_DEVICE") && (path_media != path_media_global)) {
-					fprintf(stderr, "%d: cannot use \'%s\' with \'%s\'\n",
-					        __LINE__, path_video.c_str(), path_media_global.c_str());
-					return -1;
-				}
-				path_video_global = path_video;
-				path_media_global = path_media;
-				setenv("V4L2_TRACER_OPTION_SET_VIDEO_DEVICE", "true", 0);
+				setenv("V4L2_TRACER_OPTION_SET_VIDEO_DEVICE", path_video.c_str(), 0);
 			} else {
 				fprintf(stderr, "%d: cannot use \'%s\'\n", __LINE__, device_num.c_str());
 				return -1;
@@ -114,37 +100,10 @@ int get_options(int argc, char *argv[])
 				fprintf(stderr, "%d: <dev> \'%s\' must be a digit\n", __LINE__, device_num.c_str());
 				return -1;
 			}
-
 			if (device_num[0] >= '0' && device_num[0] <= '9' && device_num.length() <= 3) {
 				std::string path_media = "/dev/media";
 				path_media += optarg;
-
-				setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
-				int media_fd = open(path_media.c_str(), O_RDONLY);
-				unsetenv("V4L2_TRACER_PAUSE_TRACE");
-
-				if (media_fd < 0) {
-					fprintf(stderr, "%d: cannot use \'%s\'\n", __LINE__, path_media.c_str());
-					return -1;
-				}
-
-				std::string path_video = get_path_video_from_fd_media(media_fd);
-
-				if (path_video.empty()) {
-					fprintf(stderr, "%d: cannot use \'%s\'\n", __LINE__, path_media.c_str());
-					close(media_fd);
-					return -1;
-				}
-
-				if (getenv("V4L2_TRACER_OPTION_SET_VIDEO_DEVICE") && (path_video != path_video_global)) {
-					fprintf(stderr, "%d: cannot use \'%s\'\n", __LINE__, path_media.c_str());
-					close(media_fd);
-					return -1;
-				}
-
-				path_video_global = path_video;
-				path_media_global = path_media;
-				setenv("V4L2_TRACER_OPTION_SET_MEDIA_DEVICE", "true", 0);
+				setenv("V4L2_TRACER_OPTION_SET_MEDIA_DEVICE", path_media.c_str(), 0);
 			} else {
 				fprintf(stderr, "%d: cannot use \'%s\'\n", __LINE__, device_num.c_str());
 				return -1;
@@ -180,39 +139,34 @@ int get_options(int argc, char *argv[])
 
 int tracer(int argc, char *argv[], bool retrace)
 {
-	char *exec_array[argc];
-	int exec_array_index = 0;
+	char *exec[argc];
+	int exec_index = 0;
+
+	char retrace_command[] = "__retrace";
 
 	if (retrace) {
-		/* The application to be traced will be the v4l2-tracer itself, local or installed. */
-		exec_array[exec_array_index++] = argv[0];
-
-		/* Copy the video_device option so that it can be sent to the v4l2-tracer again on retracing. */
-		if (getenv("V4L2_TRACER_OPTION_SET_VIDEO_DEVICE")) {
-			std::string device_option = "-d";
-			device_option += path_video_global.substr(path_video_global.find_first_of("0123456789"));
-			exec_array[exec_array_index] = (char*) calloc(sizeof(device_option) + 1, sizeof(char));
-			strncpy(exec_array[exec_array_index++], device_option.c_str(), sizeof(device_option));
+		std::string trace_file = argv[optind];
+		if (trace_file.find(".json") == trace_file.npos) {
+			fprintf(stderr, "Trace file \'%s\' must be JSON-formatted\n", trace_file.c_str());
+			if (is_verbose())
+				fprintf(stderr, "error: %s:%d\n", __func__, __LINE__);
+			print_usage();
+			return -1;
 		}
-
-		/* Copy the media_device option so that it can be sent to the v4l2-tracer again on retracing. */
-		if (getenv("V4L2_TRACER_OPTION_SET_MEDIA_DEVICE")) {
-			std::string device_option = "-m";
-			device_option += path_media_global.substr(path_media_global.find_first_of("0123456789"));
-			exec_array[exec_array_index] = (char*) calloc(sizeof(device_option) + 1, sizeof(char));
-			strncpy(exec_array[exec_array_index++], device_option.c_str(), sizeof(device_option));
-		}
-
-		exec_array[exec_array_index] = (char*) calloc(sizeof("__retrace") + 1, sizeof(char));
-		strcpy(exec_array[exec_array_index++], "__retrace");
-		exec_array[exec_array_index++] = argv[optind]; /* trace file name */
-	} else {
-		/* Copy the application to be traced from the command line. */
-		while (optind < argc)
-			exec_array[exec_array_index++] = argv[optind++];
 	}
-	exec_array[exec_array_index] = nullptr;
 
+	/* Get the application to be traced. */
+	if (retrace) {
+		exec[exec_index++] = argv[0]; /* tracee is v4l2-tracer, local or installed */
+		exec[exec_index++] = retrace_command;
+		exec[exec_index++] = argv[optind]; /* json file to be retraced */
+	} else {
+		while (optind < argc)
+			exec[exec_index++] = argv[optind++];
+	}
+	exec[exec_index] = nullptr;
+
+	/* Create a unique trace filename and open a file. */
 	std::string trace_id;
 	if (retrace) {
 		std::string json_file_name = argv[optind];
@@ -223,7 +177,6 @@ int tracer(int argc, char *argv[], bool retrace)
 		trace_id = trace_id.substr(5, trace_id.npos) + "_trace";
 	}
 	setenv("TRACE_ID", trace_id.c_str(), 0);
-
 	std::string trace_filename = trace_id + ".json";
 	FILE *trace_file = fopen(trace_filename.c_str(), "w");
 	if (trace_file == nullptr) {
@@ -232,8 +185,11 @@ int tracer(int argc, char *argv[], bool retrace)
 		return errno;
 	}
 
+	/* Open the json array.*/
 	fputs("[\n", trace_file);
+
 	/* Add v4l2-tracer info to the top of the trace file. */
+	std::string json_str;
 	json_object *v4l2_tracer_info_obj = json_object_new_object();
 	json_object_object_add(v4l2_tracer_info_obj, "package_version", json_object_new_string(PACKAGE_VERSION));
 	std::string git_commit_cnt = STRING(GIT_COMMIT_CNT);
@@ -241,15 +197,23 @@ int tracer(int argc, char *argv[], bool retrace)
 	json_object_object_add(v4l2_tracer_info_obj, "git_commit_cnt", json_object_new_string(git_commit_cnt.c_str()));
 	json_object_object_add(v4l2_tracer_info_obj, "git_sha", json_object_new_string(STRING(GIT_SHA)));
 	json_object_object_add(v4l2_tracer_info_obj, "git_commit_date", json_object_new_string(STRING(GIT_COMMIT_DATE)));
-	int flags;
-	if (getenv("TRACE_OPTION_PRETTY_PRINT_ALL"))
-		flags = JSON_C_TO_STRING_PRETTY;
-	else
-		flags = JSON_C_TO_STRING_PLAIN;
-	std::string json_str = json_object_to_json_string_ext(v4l2_tracer_info_obj, flags);
+	json_str = json_object_to_json_string(v4l2_tracer_info_obj);
 	fwrite(json_str.c_str(), sizeof(char), json_str.length(), trace_file);
 	fputs(",\n", trace_file);
 	json_object_put(v4l2_tracer_info_obj);
+
+	json_object *tracee_obj = json_object_new_object();
+	std::string tracee;
+	for (int i = 0; i < argc; i++) {
+		tracee += argv[i];
+		tracee += " ";
+	}
+	json_object_object_add(tracee_obj, "Trace", json_object_new_string(tracee.c_str()));
+	json_str = json_object_to_json_string(tracee_obj);
+	fwrite(json_str.c_str(), sizeof(char), json_str.length(), trace_file);
+	fputs(",\n", trace_file);
+	json_object_put(tracee_obj);
+
 	fclose(trace_file);
 
 	/*
@@ -274,33 +238,36 @@ int tracer(int argc, char *argv[], bool retrace)
 		fprintf(stderr, "Loading libv4l2tracer: %s\n", libv4l2tracer_path.c_str());
 	setenv("LD_PRELOAD", libv4l2tracer_path.c_str(), 0);
 
-	exec_array[exec_array_index] = nullptr;
-
 	if (fork() == 0) {
 
 		if (is_debug()) {
 			fprintf(stderr, "tracee: ");
-			for (int i = 0; i < exec_array_index; i++)
-				fprintf(stderr,"%s ", exec_array[i]);
+			for (int i = 0; i < exec_index; i++)
+				fprintf(stderr,"%s ", exec[i]);
 			fprintf(stderr, "\n");
 		}
 
-		execvpe(exec_array[0], (char* const*) exec_array, environ);
+		execvpe(exec[0], (char* const*) exec, environ);
 
 		if (is_verbose())
 			fprintf(stderr, "error: v4l2-tracer.cpp:%d, ", __LINE__);
 
-
-		fprintf(stderr, "Failed to trace application: %s\n", exec_array[0]);
-		perror("Could not execute application");
+		fprintf(stderr, "%s: ", exec[0]);
+		perror("could not execute application");
 		return errno;
 	}
 
-	int tracee_result;
-	wait(&tracee_result);
+	int exec_result;
+	wait(&exec_result);
 
-	if (WEXITSTATUS(tracee_result)) {
+	if (WEXITSTATUS(exec_result)) {
 		fprintf(stderr, "Trace error: %s\n", trace_filename.c_str());
+
+		trace_file = fopen(trace_filename.c_str(), "a");
+		fseek(trace_file, 0L, SEEK_END);
+		fputs("\n]\n", trace_file);
+		fclose(trace_file);
+
 		exit(EXIT_FAILURE);
 	}
 
@@ -309,23 +276,6 @@ int tracer(int argc, char *argv[], bool retrace)
 	fseek(trace_file, 0L, SEEK_END);
 	fputs("\n]\n", trace_file);
 	fclose(trace_file);
-
-	if (retrace) {
-		for (int i = 0; i < exec_array_index; i++) {
-			if (strncmp(exec_array[i], "-d", 2) == 0) {
-				free (exec_array[i]);
-				continue;
-			}
-			if (strncmp(exec_array[i], "-m", 2) == 0) {
-				free (exec_array[i]);
-				continue;
-			}
-			if (strcmp(exec_array[i], "__retrace") == 0) {
-				free (exec_array[i]);
-				continue;
-			}
-		}
-	}
 
 	if (retrace)
 		fprintf(stderr, "Retrace complete: ");
@@ -345,10 +295,6 @@ int main(int argc, char *argv[])
 		print_usage();
 		return ret;
 	}
-
-	/* If v4l2-tracer is called recursively, allow these variables to be set again. */
-	unsetenv("V4L2_TRACER_OPTION_SET_VIDEO_DEVICE");
-	unsetenv("V4L2_TRACER_OPTION_SET_MEDIA_DEVICE");
 
 	ret = get_options(argc, argv);
 
@@ -377,17 +323,12 @@ int main(int argc, char *argv[])
 	if (command == "trace") {
 		ret = tracer(argc, argv);
 	} else if (command == "retrace") {
-		std::string trace_file = argv[optind];
-		if (trace_file.find(".json") == trace_file.npos) {
-			fprintf(stderr, "Trace file \'%s\' must be JSON-formatted\n", trace_file.c_str());
-			if (is_verbose())
-				fprintf(stderr, "error: v4l2-tracer.cpp:%d\n", __LINE__);
-			print_usage();
-			return -1;
-		}
-		tracer(argc, argv, true);
+		ret = tracer(argc, argv, true);
 	} else if (command == "__retrace") {
-		/* Only the tracer itself should call this option internally. */
+		/*
+		 * This command is meant to be used internally only to allow
+		 * v4l2-tracer to recursively trace itself during a retrace.
+		 */
 		ret = retracer(argv[optind]);
 	} else {
 		if (is_verbose()) {

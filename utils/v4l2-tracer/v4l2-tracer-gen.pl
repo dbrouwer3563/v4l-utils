@@ -264,7 +264,6 @@ printf $fh_common_info_h "\#define V4L2_TRACER_INFO_GEN_H\n\n";
 printf $fh_common_info_h "#include \"v4l2-tracer-common.h\"\n\n";
 
 $in_v4l2_controls = true;
-@stateless_controls;
 
 while (<>) {
 	if (grep {/#define __LINUX_VIDEODEV2_H/} $_) {$in_v4l2_controls = false;}
@@ -290,8 +289,8 @@ while (<>) {
 		enum_gen();
 	}
 
-	if (grep {/.*\(V4L2_CID_CODEC_STATELESS_BASE.*/} $_) {
-		push (@stateless_controls, $_);
+	if (grep {/^#define (V4L2_CID\w*)\s*.*/} $_) {
+		push (@controls, $_);
 	}
 
 	if (grep {/^\/\* Control classes \*\//} $_) {
@@ -329,6 +328,39 @@ while (<>) {
 		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n\n";
 	}
 
+	if (grep {/.*Flags for 'capability' and 'capturemode' fields.*/} $_) {
+		printf $fh_common_info_h "constexpr val_def streamparm_val_def[] = {\n";
+		while (<>) {
+			last if $_ =~ /^\s*$/; #blank line
+			($streamparm) = ($_) =~ /^#define\s*(\w+)\s*/;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $streamparm, $streamparm;
+		}
+		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n\n";
+	}
+
+
+	if (grep {/.*V4L2_ENC_CMD_START.*/} $_) {
+		printf $fh_common_info_h "constexpr val_def encoder_cmd_val_def[] = {\n";
+		($enc_cmd) = ($_) =~ /^#define\s*(\w+)\s*/;
+		printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $enc_cmd, $enc_cmd;
+		while (<>) {
+			last if $_ =~ /^\s*$/; #blank line
+			($enc_cmd) = ($_) =~ /^#define\s*(\w+)\s*/;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $enc_cmd, $enc_cmd;
+		}
+		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n\n";
+	}
+
+	if (grep {/.*Decoder commands.*/} $_) {
+		printf $fh_common_info_h "constexpr val_def decoder_cmd_val_def[] = {\n";
+		while (<>) {
+			last if $_ =~ /^\s*$/; #blank line
+			($dec_cmd) = ($_) =~ /^#define\s*(\w+)\s*/;
+			printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $dec_cmd, $dec_cmd;
+		}
+		printf $fh_common_info_h "\t{ -1, \"\" }\n};\n\n";
+	}
+
 	if (grep {/.*I O C T L   C O D E S   F O R   V I D E O   D E V I C E S.*/} $_) {
 		printf $fh_common_info_h "constexpr val_def ioctl_video_val_def[] = {\n";
 
@@ -359,8 +391,8 @@ while (<>) {
 	}
 }
 
-printf $fh_common_info_h "constexpr val_def stateless_controls_val_def[] = {\n";
-foreach (@stateless_controls) {
+printf $fh_common_info_h "constexpr val_def controls_val_def[] = {\n";
+foreach (@controls) {
 	($control) = ($_) =~ /^#define\s*(\w+)\s*/;
 	printf $fh_common_info_h "\t{ %s,\t\"%s\" },\n", $control, $control;
 }

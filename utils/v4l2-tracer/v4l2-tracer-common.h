@@ -40,9 +40,6 @@ struct val_def {
 	const char *str;
 };
 
-extern std::string path_media_global;
-extern std::string path_video_global;
-
 bool is_verbose(void);
 bool is_debug(void);
 
@@ -66,8 +63,8 @@ unsigned long s2flags_fwht(std::string s);
 
 std::string which2s(unsigned long which);
 
-std::string get_path_media_from_path_video(std::string path_video_arg);
-std::string get_path_video_from_fd_media(int fd);
+std::string get_path_media(std::string driver);
+std::string get_path_video(int media_fd, std::list<std::string> linked_entities);
 std::list<std::string> get_linked_entities(int media_fd, std::string path_video);
 
 #include "v4l2-tracer-info-gen.h"

@@ -18,10 +18,46 @@ void trace_mem_encoded(int fd, __u32 offset);
 json_object *trace_ioctl_args(int fd, unsigned long cmd, void *arg,
                               bool from_userspace = true);
 
-std::list<unsigned long> ioctls_to_trace = {
-	VIDIOC_G_FMT, VIDIOC_S_FMT, VIDIOC_REQBUFS, VIDIOC_QUERYBUF, VIDIOC_QBUF, VIDIOC_DQBUF,
-	VIDIOC_EXPBUF, VIDIOC_STREAMON, VIDIOC_STREAMOFF, VIDIOC_S_EXT_CTRLS, MEDIA_IOC_REQUEST_ALLOC,
-	MEDIA_REQUEST_IOC_QUEUE, MEDIA_REQUEST_IOC_REINIT
+
+std::list<unsigned long> ioctls_informational = {
+	VIDIOC_QUERYCAP,
+	VIDIOC_ENUM_FMT,
+	VIDIOC_G_PARM,
+	VIDIOC_G_CTRL,
+	VIDIOC_QUERYCTRL,
+	VIDIOC_QUERYMENU,
+	VIDIOC_G_CROP,
+	VIDIOC_TRY_FMT,
+	VIDIOC_G_EXT_CTRLS,
+	VIDIOC_TRY_EXT_CTRLS,
+	VIDIOC_TRY_ENCODER_CMD,
+	VIDIOC_G_SELECTION,
+	VIDIOC_TRY_DECODER_CMD,
+	VIDIOC_QUERY_EXT_CTRL
+};
+
+std::list<unsigned long> ioctls_essential = {
+	VIDIOC_G_FMT,
+	VIDIOC_S_FMT,
+	VIDIOC_REQBUFS,
+	VIDIOC_QUERYBUF,
+	VIDIOC_QBUF,
+	VIDIOC_DQBUF,
+	VIDIOC_EXPBUF,
+	VIDIOC_STREAMON,
+	VIDIOC_STREAMOFF,
+	VIDIOC_S_PARM,
+	VIDIOC_S_CTRL,
+	// VIDIOC_S_CROP,
+	VIDIOC_S_EXT_CTRLS,
+	VIDIOC_ENCODER_CMD,
+	VIDIOC_CREATE_BUFS,
+	VIDIOC_PREPARE_BUF,
+	// VIDIOC_S_SELECTION,
+	VIDIOC_DECODER_CMD,
+	MEDIA_IOC_REQUEST_ALLOC,
+	MEDIA_REQUEST_IOC_QUEUE,
+	MEDIA_REQUEST_IOC_REINIT
 };
 
 int open(const char *path, int oflag, ...)
@@ -40,7 +76,7 @@ int open(const char *path, int oflag, ...)
 	original_open = (int (*)(const char*, int, ...)) dlsym(RTLD_NEXT, "open");
 	int fd = (*original_open)(path, oflag, mode);
 
-	if (is_verbose())
+	if (is_debug())
 		fprintf(stderr, "\n%s: fd: %d, %s\n", __func__, fd, path);
 
 	/* Don't trace the opening if tracing is paused. */
@@ -74,6 +110,10 @@ int open64(const char *path, int oflag, ...)
 	original_open64 = (int (*)(const char*, int, ...)) dlsym(RTLD_NEXT, "open64");
 	int fd = (*original_open64)(path, oflag, mode);
 
+	if (is_debug())
+		fprintf(stderr, "\n%s: fd: %d, %s\n", __func__, fd, path);
+
+	/* Don't trace the opening if tracing is paused. */
 	if (getenv("V4L2_TRACER_PAUSE_TRACE"))
 		return fd;
 
@@ -93,7 +133,7 @@ int close(int fd)
 	errno = 0;
 	std::string path = get_device(fd);
 
-	if (is_verbose())
+	if (is_debug())
 		fprintf(stderr, "\n%s: fd: %d, %s\n", __func__, fd, path.c_str());
 
 	/* Only trace the close if a corresponding open was also traced. */
@@ -187,8 +227,15 @@ int ioctl(int fd, unsigned long cmd, ...)
 	int (*original_ioctl)(int fd, unsigned long cmd, ...);
 	original_ioctl = (int (*)(int, long unsigned int, ...)) dlsym(RTLD_NEXT, "ioctl");
 
-	/* Don't trace ioctls that are not in the specified ioctls_to_trace list. */
-	if (find(ioctls_to_trace.begin(), ioctls_to_trace.end(), cmd) == ioctls_to_trace.end())
+	/* Don't trace if v4l2-tracer has paused tracing. */
+	if (getenv("V4L2_TRACER_PAUSE_TRACE"))
+		return (*original_ioctl)(fd, cmd, arg);
+
+	/*
+	 * Don't trace ioctls that are not in the specified ioctls list.
+	 * TODO: add an option to trace just one/more specified ioctls.
+	 */
+	if (find(ioctls_essential.begin(), ioctls_essential.end(), cmd) == ioctls_essential.end())
 		return (*original_ioctl)(fd, cmd, arg);
 
 	if (cmd == VIDIOC_S_EXT_CTRLS)

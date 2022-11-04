@@ -8,9 +8,6 @@
 #include <iomanip>
 #include "v4l2-tracer-common.h"
 
-std::string path_video_global;
-std::string path_media_global;
-
 bool is_verbose()
 {
 	return getenv("V4L2_TRACER_OPTION_VERBOSE");
@@ -388,25 +385,23 @@ unsigned long s2flags_fwht(std::string s)
 	return flags;
 }
 
-std::string get_path_media_from_path_video(std::string path_video_arg)
+std::string get_path_media(std::string driver)
 {
 	std::string path_media;
 
 	DIR *dp = opendir("/dev");
 	if (dp == nullptr)
-		return "";
+		return path_media;
 
 	struct dirent *ep;
-	while ((ep = readdir(dp)) && path_media.empty()) {
+	while ((ep = readdir(dp))) {
 
 		const char *name = ep->d_name;
 		if (memcmp(name, "media", 5) || !isdigit(name[5]))
 			continue;
 
-		std::string media_entity_name;
 		std::string media_devname = std::string("/dev/") + name;
 
-		/* Don't trace v4l2-tracer's own "open" call. */
 		setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
 		int media_fd = open(media_devname.c_str(), O_RDONLY);
 		unsetenv("V4L2_TRACER_PAUSE_TRACE");
@@ -414,153 +409,80 @@ std::string get_path_media_from_path_video(std::string path_video_arg)
 		if (media_fd < 0)
 			continue;
 
-		struct media_v2_topology topology = {};
-		if (ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology))
-			continue;
-
-		auto ents = new media_v2_entity[topology.num_entities];
-		topology.ptr_entities = (uintptr_t)ents;
-		auto links = new media_v2_link[topology.num_links];
-		topology.ptr_links = (uintptr_t)links;
-		auto ifaces = new media_v2_interface[topology.num_interfaces];
-		topology.ptr_interfaces = (uintptr_t)ifaces;
-		auto pads = new media_v2_pad[topology.num_pads];
-		topology.ptr_pads = (uintptr_t)pads;
-
-		ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
-
-		/* Start traversing the topology. */
-		__u32 pad_sink_id = 0;
-		for (__u32 i = 0; i < topology.num_entities; i++) {
-
-			if (ents[i].function != MEDIA_ENT_F_PROC_VIDEO_DECODER)
-				continue;
-
-			media_entity_name = ents[i].name;
-
-			/*
-			 * Find the source pad on the media decoder and follow its link to the
-			 * sink pad on the sink i/o entity. This is an arbitrary choice of direction since
-			 * both the sink and source eventually lead to the video device.
-			 */
-			for (__u32 j = 0; j < topology.num_pads; j++) {
-				if (pads[j].entity_id != ents[i].id)
-					continue;
-
-				for (__u32 k = 0; k < topology.num_links; k++) {
-					if (links[k].source_id != pads[j].id)
-						continue;
-					pad_sink_id = links[k].sink_id;
-				}
-			}
-		}
-
-		if (!pad_sink_id) {
-			delete [] ents;
-			delete [] links;
-			delete [] ifaces;
-			delete [] pads;
+		struct media_device_info info = {};
+		if (ioctl(media_fd, MEDIA_IOC_DEVICE_INFO, &info) || info.driver != driver) {
 			close(media_fd);
 			continue;
-		}
-
-		/* Find the interface linked to the sink i/o entity. */
-		__u32 interface_id = 0;
-		for (__u32 i = 0; i < topology.num_entities; i++) {
-			if (ents[i].function != MEDIA_ENT_F_IO_V4L)
-				continue;
-
-			for (__u32 j = 0; j < topology.num_pads; j++) {
-				if ((pads[j].entity_id != ents[i].id) || (pads[j].id != pad_sink_id))
-					continue;
-
-				for (__u32 k = 0; k < topology.num_links; k++) {
-					if (links[k].sink_id != ents[i].id)
-						continue;
-					interface_id = links[k].source_id;
-				}
-			}
-		}
-
-		if (!interface_id) {
-			delete [] ents;
-			delete [] links;
-			delete [] ifaces;
-			delete [] pads;
+		} else {
+			path_media = media_devname;
 			close(media_fd);
-			continue;
+			break;
 		}
-
-		/* Get the interface's /dev/video path string. */
-		std::string path_video;
-
-		for (__u32 i = 0; i < topology.num_interfaces; i++) {
-			if (ifaces[i].intf_type != MEDIA_INTF_T_V4L_VIDEO)
-				continue;
-			if (ifaces[i].id != interface_id)
-				continue;
-			path_video = mi_media_get_device(ifaces[i].devnode.major, ifaces[i].devnode.minor);
-		}
-
-		delete [] ents;
-		delete [] links;
-		delete [] ifaces;
-		delete [] pads;
-		close(media_fd);
-
-		if (path_video.empty() || ((!path_video_arg.empty()) && (path_video_arg != path_video)))
-			continue;
-
-		path_media = media_devname;
 	}
 	closedir(dp);
 
 	return path_media;
 }
 
-std::string get_path_video_from_fd_media(int fd)
+std::string get_path_video(int media_fd, std::list<std::string> linked_entities)
 {
 	std::string path_video;
 
+	/* Get topology */
 	struct media_v2_topology topology = {};
-	if (ioctl(fd, MEDIA_IOC_G_TOPOLOGY, &topology))
-		return "";
 
-	auto ents = new media_v2_entity[topology.num_entities];
-	topology.ptr_entities = (uintptr_t)ents;
-	auto links = new media_v2_link[topology.num_links];
-	topology.ptr_links = (uintptr_t)links;
+	int err = 0;
+	setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
+	err = ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
+	unsetenv("V4L2_TRACER_PAUSE_TRACE");
+	if (err < 0)
+		return path_video;
+
 	auto ifaces = new media_v2_interface[topology.num_interfaces];
 	topology.ptr_interfaces = (uintptr_t)ifaces;
-	auto pads = new media_v2_pad[topology.num_pads];
-	topology.ptr_pads = (uintptr_t)pads;
+	auto links = new media_v2_link[topology.num_links];
+	topology.ptr_links = (uintptr_t)links;
+	auto ents = new media_v2_entity[topology.num_entities];
+	topology.ptr_entities = (uintptr_t)ents;
 
-	__u32 interface_id = 0;
-	ioctl(fd, MEDIA_IOC_G_TOPOLOGY, &topology);
-	for (__u32 i = 0; i < topology.num_entities; i++) {
-		if (ents[i].function != MEDIA_ENT_F_IO_V4L)
-				continue;
+	setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
+	err = ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
+	unsetenv("V4L2_TRACER_PAUSE_TRACE");
 
-		for (__u32 j = 0; j < topology.num_links; j++) {
-			if (links[j].sink_id != ents[i].id)
-				continue;
-			interface_id = links[j].source_id;
-		}
+	if (err < 0) {
+		delete [] ifaces;
+		delete [] links;
+		delete [] ents;
+		return path_video;
 	}
 
-	if (interface_id) {
-		for (__u32 i = 0; i < topology.num_interfaces; i++) {
-			if (ifaces[i].id != interface_id)
+	for (auto &name : linked_entities) {
+
+		/* Find an entity listed in the video device's linked_entities. */
+		for (__u32 i = 0; i < topology.num_entities; i++) {
+			if (ents[i].name != name)
 				continue;
-			path_video = mi_media_get_device(ifaces[i].devnode.major, ifaces[i].devnode.minor);
+
+			/* Find the first link connected to that entity. */
+			for (__u32 j = 0; j < topology.num_links; j++) {
+				if (links[j].sink_id != ents[i].id)
+					continue;
+
+				/* Find the interface connected to that link. */
+				for (__u32 k = 0; k < topology.num_interfaces; k++) {
+					if (ifaces[k].id != links[j].source_id)
+						continue;
+
+					std::string video_devname = mi_media_get_device(ifaces[k].devnode.major, ifaces[k].devnode.minor);
+
+					if (!video_devname.empty()) {
+						path_video = video_devname;
+						break;
+					}
+				}
+			}
 		}
 	}
-
-	delete [] ents;
-	delete [] links;
-	delete [] ifaces;
-	delete [] pads;
-
 	return path_video;
 }
 
@@ -568,39 +490,56 @@ std::list<std::string> get_linked_entities(int media_fd, std::string path_video)
 {
 	std::list<std::string> linked_entities;
 
+	/* Get topology */
+	int err = 0;
 	struct media_v2_topology topology = {};
-	if (ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology))
+	setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
+	err = ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
+	unsetenv("V4L2_TRACER_PAUSE_TRACE");
+	if (err < 0)
 		return linked_entities;
 
-	auto ents = new media_v2_entity[topology.num_entities];
-	topology.ptr_entities = (uintptr_t)ents;
-	auto links = new media_v2_link[topology.num_links];
-	topology.ptr_links = (uintptr_t)links;
 	auto ifaces = new media_v2_interface[topology.num_interfaces];
 	topology.ptr_interfaces = (uintptr_t)ifaces;
-	auto pads = new media_v2_pad[topology.num_pads];
-	topology.ptr_pads = (uintptr_t)pads;
+	auto links = new media_v2_link[topology.num_links];
+	topology.ptr_links = (uintptr_t)links;
+	auto ents = new media_v2_entity[topology.num_entities];
+	topology.ptr_entities = (uintptr_t)ents;
 
-	ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
+	setenv("V4L2_TRACER_PAUSE_TRACE", "true", 0);
+	err = ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
+	unsetenv("V4L2_TRACER_PAUSE_TRACE");
+	if (err < 0) {
+		delete [] ifaces;
+		delete [] links;
+		delete [] ents;
+		return linked_entities;
+	}
 
+	/* find the interface corresponding to the path_video */
 	for (__u32 i = 0; i < topology.num_interfaces; i++) {
 		if (path_video != mi_media_get_device(ifaces[i].devnode.major, ifaces[i].devnode.minor))
 			continue;
 
+		/* find the links from that interface */
 		for (__u32 j = 0; j < topology.num_links; j++) {
 			if (links[j].source_id != ifaces[i].id)
 				continue;
+
+			/* find the entities connected by that link to the interface */
 			for (__u32 k = 0; k < topology.num_entities; k++) {
 				if (ents[k].id != links[j].sink_id)
 					continue;
 				linked_entities.push_back(ents[k].name);
 			}
 		}
+		if (linked_entities.size())
+			break;
 	}
+
 	delete [] ents;
 	delete [] links;
 	delete [] ifaces;
-	delete [] pads;
 
 	return linked_entities;
 }
