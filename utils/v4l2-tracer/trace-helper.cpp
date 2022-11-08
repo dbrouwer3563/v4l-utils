@@ -36,13 +36,6 @@ struct trace_context {
 	std::unordered_map<int, std::string> devices; /* key:fd, value: path of the device */
 };
 
-std::string ver2s(unsigned int version)
-{
-	char buf[16];
-	sprintf(buf, "%d.%d.%d", version >> 16, (version >> 8) & 0xff, version & 0xff);
-	return buf;
-}
-
 struct trace_context ctx_trace = {
 	.lock = PTHREAD_MUTEX_INITIALIZER
 };

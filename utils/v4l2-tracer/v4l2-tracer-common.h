@@ -46,6 +46,7 @@ bool is_debug(void);
 void print_v4l2_tracer_info(void);
 void print_usage(void);
 
+std::string ver2s(unsigned int version);
 std::string number2s_oct(long num);
 std::string number2s(long num);
 std::string val2s(long val, const val_def *def);

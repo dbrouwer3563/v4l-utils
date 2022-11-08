@@ -6,8 +6,6 @@
 #ifndef TRACE_HELPER_H
 #define TRACE_HELPER_H
 
-std::string ver2s(unsigned int version);
-
 bool is_video_or_media_device(const char *path);
 void add_device(int fd, std::string path);
 std::string get_device(int fd);

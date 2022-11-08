@@ -36,6 +36,7 @@ void print_usage(void)
 	        "\t\t-e, --prettymem   Add whitespace in JSON file just to the memory arrays.\n"
 	        "\t\t-g, --debug       Turn on verbose reporting plus additional info for debugging.\n"
 	        "\t\t-h, --help        Display this message.\n"
+	        "\t\t-i, --info        Include ioctls that are informational only.\n"
 	        "\t\t-p, --pretty      Add whitespace in JSON file to improve readability.\n"
 	        "\t\t-r  --raw         Write decoded video frame data to JSON file.\n"
 	        "\t\t-v, --verbose     Turn on verbose reporting.\n"
@@ -48,6 +49,13 @@ void print_usage(void)
 	        "\t\t-m, --media_device <dev>   Retrace with a specific media device.\n"
 	        "\t\t                           <dev> must be a digit corresponding to\n"
 	        "\t\t                           /dev/media<dev> \n\n");
+}
+
+std::string ver2s(unsigned int version)
+{
+	char buf[16];
+	sprintf(buf, "%d.%d.%d", version >> 16, (version >> 8) & 0xff, version & 0xff);
+	return buf;
 }
 
 /* Convert a long val to an octal string. If num is 0, return an empty string. */
@@ -76,6 +84,8 @@ std::string number2s(long num)
 std::string val2s(long val, const val_def *def)
 {
 	std::string s;
+	if (def == nullptr)
+		return number2s(val);
 
 	while ((def->val != -1) && (def->val != val))
 		def++;
@@ -107,6 +117,8 @@ std::string ioctl2s(unsigned long cmd)
 std::string fl2s(unsigned val, const flag_def *def)
 {
 	std::string s;
+	if (def == nullptr)
+		return number2s(val);
 
 	while (def->flag) {
 		if (val & def->flag) {
@@ -223,6 +235,9 @@ long s2val(std::string s, const val_def *def)
 	if (s.empty())
 		return 0;
 
+	if (def == nullptr)
+		return s2number(s);
+
 	while ((def->val != -1) && (def->str != s))
 		def++;
 
@@ -255,6 +270,9 @@ unsigned long s2flags(std::string s, const flag_def *def)
 {
 	size_t idx;
 	unsigned long flags = 0;
+
+	if (def == nullptr)
+		return s2number(s);
 
 	while (def->flag) {
 		idx = s.find(def->str);

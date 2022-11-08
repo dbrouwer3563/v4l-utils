@@ -15,6 +15,7 @@ enum Options {
 	V4l2TracerOptPrettyPrintMemory = 'e',
 	V4l2TracerOptDebug = 'g',
 	V4l2TracerOptHelp = 'h',
+	V4l2TracerOptIoctlsInfo = 'i',
 	V4l2TracerOptSetMediaDevice = 'm',
 	V4l2TracerOptPrettyPrint = 'p',
 	V4l2TracerOptWriteDecodedToJson = 'r',
@@ -27,6 +28,7 @@ static struct option long_options[] = {
 	{ "prettymem", no_argument, nullptr, V4l2TracerOptPrettyPrintMemory },
 	{ "debug", no_argument, nullptr, V4l2TracerOptDebug },
 	{ "help", no_argument, nullptr, V4l2TracerOptHelp },
+	{ "info", no_argument, nullptr, V4l2TracerOptIoctlsInfo },
 	{ "media_device", required_argument, nullptr, V4l2TracerOptSetMediaDevice },
 	{ "pretty", no_argument, nullptr, V4l2TracerOptPrettyPrint },
 	{ "raw", no_argument, nullptr, V4l2TracerOptWriteDecodedToJson },
@@ -40,6 +42,7 @@ char short_options[] = {
 	V4l2TracerOptPrettyPrintMemory,
 	V4l2TracerOptDebug,
 	V4l2TracerOptHelp,
+	V4l2TracerOptIoctlsInfo,
 	V4l2TracerOptSetMediaDevice, ':',
 	V4l2TracerOptPrettyPrint,
 	V4l2TracerOptWriteDecodedToJson,
@@ -92,6 +95,9 @@ int get_options(int argc, char *argv[])
 		case V4l2TracerOptHelp:
 			print_usage();
 			return -1;
+		case V4l2TracerOptIoctlsInfo:
+			setenv("V4L2_TRACER_OPTION_IOCTLS_INFO", "true", 0);
+			break;
 		case V4l2TracerOptSetMediaDevice: {
 			std::string device_num = optarg;
 			try {
@@ -188,7 +194,7 @@ int tracer(int argc, char *argv[], bool retrace)
 	/* Open the json array.*/
 	fputs("[\n", trace_file);
 
-	/* Add v4l2-tracer info to the top of the trace file. */
+	/* Add v4l-utils package and git info to the top of the trace file. */
 	std::string json_str;
 	json_object *v4l2_tracer_info_obj = json_object_new_object();
 	json_object_object_add(v4l2_tracer_info_obj, "package_version", json_object_new_string(PACKAGE_VERSION));
@@ -202,6 +208,7 @@ int tracer(int argc, char *argv[], bool retrace)
 	fputs(",\n", trace_file);
 	json_object_put(v4l2_tracer_info_obj);
 
+	/* Add v4l2-tracer command line to the top of the trace file. */
 	json_object *tracee_obj = json_object_new_object();
 	std::string tracee;
 	for (int i = 0; i < argc; i++) {
@@ -209,11 +216,13 @@ int tracer(int argc, char *argv[], bool retrace)
 		tracee += " ";
 	}
 	json_object_object_add(tracee_obj, "Trace", json_object_new_string(tracee.c_str()));
+	const time_t t = time(nullptr);
+	json_object_object_add(tracee_obj, "Timestamp", json_object_new_string(ctime(&t)));
+
 	json_str = json_object_to_json_string(tracee_obj);
 	fwrite(json_str.c_str(), sizeof(char), json_str.length(), trace_file);
 	fputs(",\n", trace_file);
 	json_object_put(tracee_obj);
-
 	fclose(trace_file);
 
 	/*

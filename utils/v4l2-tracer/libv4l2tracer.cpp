@@ -19,13 +19,12 @@ json_object *trace_ioctl_args(int fd, unsigned long cmd, void *arg,
                               bool from_userspace = true);
 
 
-std::list<unsigned long> ioctls_informational = {
+std::list<unsigned long> ioctls_info = {
 	VIDIOC_QUERYCAP,
 	VIDIOC_ENUM_FMT,
 	VIDIOC_G_PARM,
 	VIDIOC_G_CTRL,
 	VIDIOC_QUERYCTRL,
-	VIDIOC_QUERYMENU,
 	VIDIOC_G_CROP,
 	VIDIOC_TRY_FMT,
 	VIDIOC_G_EXT_CTRLS,
@@ -36,7 +35,7 @@ std::list<unsigned long> ioctls_informational = {
 	VIDIOC_QUERY_EXT_CTRL
 };
 
-std::list<unsigned long> ioctls_essential = {
+std::list<unsigned long> ioctls = {
 	VIDIOC_G_FMT,
 	VIDIOC_S_FMT,
 	VIDIOC_REQBUFS,
@@ -48,12 +47,12 @@ std::list<unsigned long> ioctls_essential = {
 	VIDIOC_STREAMOFF,
 	VIDIOC_S_PARM,
 	VIDIOC_S_CTRL,
-	// VIDIOC_S_CROP,
+	VIDIOC_S_CROP,
 	VIDIOC_S_EXT_CTRLS,
 	VIDIOC_ENCODER_CMD,
 	VIDIOC_CREATE_BUFS,
 	VIDIOC_PREPARE_BUF,
-	// VIDIOC_S_SELECTION,
+	VIDIOC_S_SELECTION,
 	VIDIOC_DECODER_CMD,
 	MEDIA_IOC_REQUEST_ALLOC,
 	MEDIA_REQUEST_IOC_QUEUE,
@@ -231,13 +230,30 @@ int ioctl(int fd, unsigned long cmd, ...)
 	if (getenv("V4L2_TRACER_PAUSE_TRACE"))
 		return (*original_ioctl)(fd, cmd, arg);
 
-	/*
-	 * Don't trace ioctls that are not in the specified ioctls list.
-	 * TODO: add an option to trace just one/more specified ioctls.
-	 */
-	if (find(ioctls_essential.begin(), ioctls_essential.end(), cmd) == ioctls_essential.end())
+	/* Don't trace ioctls that are not in the specified ioctls list. */
+	bool trace_ioctl = false;
+	if (find(ioctls.begin(), ioctls.end(), cmd) != ioctls.end())
+		trace_ioctl = true;
+	else if (getenv("V4L2_TRACER_OPTION_IOCTLS_INFO") && (find(ioctls_info.begin(), ioctls_info.end(), cmd) != ioctls_info.end()))
+		trace_ioctl = true;
+	if (!trace_ioctl)
 		return (*original_ioctl)(fd, cmd, arg);
 
+	json_object *ioctl_obj = json_object_new_object();
+	json_object_object_add(ioctl_obj, "fd", json_object_new_int(fd));
+	json_object_object_add(ioctl_obj, "ioctl", json_object_new_string(ioctl2s(cmd).c_str()));
+
+	/* Don't attempt to trace a nullptr. */
+	if (arg == nullptr) {
+		int ret = (*original_ioctl)(fd, cmd, arg);
+		if (errno)
+			json_object_object_add(ioctl_obj, "errno", json_object_new_string(strerrorname_np(errno)));
+		write_json_object_to_json_file(ioctl_obj);
+		json_object_put(ioctl_obj);
+		return ret;
+	}
+
+	/* Get info needed for writing the decoded video data to a yuv file. */
 	if (cmd == VIDIOC_S_EXT_CTRLS)
 		s_ext_ctrls_setup(static_cast<struct v4l2_ext_controls*>(arg));
 
@@ -246,10 +262,6 @@ int ioctl(int fd, unsigned long cmd, ...)
 
 	if (cmd == VIDIOC_STREAMOFF)
 		streamoff_cleanup(*(static_cast<v4l2_buf_type*>(arg)));
-
-	json_object *ioctl_obj = json_object_new_object();
-	json_object_object_add(ioctl_obj, "fd", json_object_new_int(fd));
-	json_object_object_add(ioctl_obj, "ioctl", json_object_new_string(ioctl2s(cmd).c_str()));
 
 	/* Trace the ioctl arguments provided by userspace. */
 	json_object *ioctl_args_userspace = trace_ioctl_args(fd, cmd, arg);
@@ -270,6 +282,7 @@ int ioctl(int fd, unsigned long cmd, ...)
 	write_json_object_to_json_file(ioctl_obj);
 	json_object_put(ioctl_obj);
 
+	/* Get additional info from driver that is needed for writing the decoded video data to a yuv file. */
 	if (cmd == VIDIOC_G_FMT)
 		g_fmt_setup_trace(static_cast<struct v4l2_format*>(arg));
 
